@@ -23,6 +23,7 @@
 #include "tm4c123gh6pm.h"
 #include "uart0.h"
 #include "arp.h"
+//#include "mqtt.h"
 
 // ------------------------------------------------------------------------------
 //  Globals
@@ -238,11 +239,24 @@ bool tcpIsFin(etherHeader *ether)
     return false;
 }
 
+bool tcpIsPsh(etherHeader *ether)
+{
+    ipHeader *ip = (ipHeader*)ether->data;
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+
+    uint16_t curr_flags = htons(tcp->offsetFields);
+
+    if((curr_flags & PSH) != 0)
+        return true;
+    return false;
+}
+
 
 void processTcp(etherHeader *ether, socket *s)
 {
     ipHeader *ip = (ipHeader*)ether->data;
     tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+    uint32_t dataSize = 0;
 
     switch(tcpState)
     {
@@ -269,6 +283,9 @@ void processTcp(etherHeader *ether, socket *s)
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFlag = 1;
                 tcpState = TCP_ESTABLISHED;
+
+                //after established we want to go "connected" state
+                mqttConnFlag = 1;
             }
             break;
 
@@ -276,7 +293,7 @@ void processTcp(etherHeader *ether, socket *s)
             //passive close
             putsUart0("\nstate: ESTABLISHED\n");
             s->sequenceNumber = htonl(tcp->acknowledgementNumber);
-            if(tcpIsFin(ether))
+            if(tcpIsFin(ether) && tcpIsAck(ether))
             {
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFinFlag = 1;
@@ -289,6 +306,14 @@ void processTcp(etherHeader *ether, socket *s)
                 tcpFinFlag = 1;
                 //start timer waiting for ack
                 tcpState = TCP_FIN_WAIT_1;
+            }
+            //mqtt data coming in
+            else if(tcpIsPsh(ether) && tcpIsAck(ether))
+            {
+                dataSize = htons(ip->length) - (ip->size * 4) - sizeof(tcpHeader);
+                s->acknowledgementNumber = htonl(tcp->sequenceNumber) + dataSize;
+                tcpAckFlag = 1;
+                //processMqtt(ether, s);
             }
             break;
 
@@ -341,5 +366,4 @@ void processArpResponse(etherHeader *ether, socket *s)
     }
 
 }
-
 

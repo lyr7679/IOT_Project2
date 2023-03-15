@@ -440,6 +440,11 @@ void checkPending(etherHeader *ether, socket *s)
         sendTcpMessage(ether, s, FIN, NULL, 0);
         tcpFinFlag = 0;
     }
+    if(mqttConnFlag)
+    {
+        sendMqttConnect(ether, s, CLEAN_SESH, "raquel");
+        mqttConnFlag = 0;
+    }
 //
 //    if(tcpSynFlag)
 //    {
@@ -566,8 +571,8 @@ int main(void)
             // Handle IP datagram
             if (isIp(data))
             {
-            	if (isIpUnicast(data))
-            	{
+                if (isIpUnicast(data))
+                {
                     // Handle ICMP ping request
                     if (isPingRequest(data))
                     {
@@ -596,4 +601,3 @@ int main(void)
         }
     }
 }
-

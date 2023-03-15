@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "ip.h"
+#include "mqtt.h"
 
 typedef struct _tcpHeader // 20 or more bytes
 {
@@ -102,4 +103,3 @@ void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[
 void processArpResponse(etherHeader *ether, socket *s);
 
 #endif
-
