@@ -53,18 +53,22 @@
 #define USRNAME 0x80
 
 uint8_t mqttConnFlag;
+uint8_t mqttPubFlag;
+uint8_t mqttSubFlag;
 
 typedef struct _mqttHeader
 {
   uint8_t controlHeader;
-  uint32_t remainingLength;
+  uint8_t remainingLength;
   uint8_t  data[0];         //mqtt variable header (all types)
 } mqttHeader;
 
 typedef struct _mqttConnectHeader
 {
     uint16_t protocolLength;
-    char protocolName[4];
+//    uint8_t msb;
+//    uint8_t lsb;
+    uint8_t protocolName[4];
     uint8_t protocolLevel;
     uint8_t controlFlags;
     uint16_t keepAliveTime;
@@ -72,23 +76,40 @@ typedef struct _mqttConnectHeader
 
 } mqttConnectHeader;
 
+typedef struct _mqttConnectPayload
+{
+    uint16_t msb_lsb;
+//    uint8_t msb;
+//    uint8_t lsb;
+    uint8_t data[0];
+} mqttConnectPayload;
+
 typedef struct _mqttConnackHeader
 {
     uint8_t connackFlags;
     uint8_t returnCode;
 } mqttConnackHeader;
 
-typedef struct _mqttSubscribeHeader
+typedef struct _mqttPublishHeader
 {
-    uint16_t packetID;
-    uint8_t data[0];    //payload for topic name + qos
-} mqttSubscribeHeader;
+    uint16_t header_msb_lsb;
+    uint8_t topic[0];
+    //uint16_t packetID;
+    uint8_t data[0];    //payload for data
+} mqttPublishHeader;
 
-uint32_t encodeLength(uint32_t X);
+typedef struct _mqttPublishPayload
+{
+    uint16_t msb_lsb;
+    uint8_t data[0];
+} mqttPublishPayload;
+
+uint8_t encodeLength(uint8_t X);
 void processMqtt(etherHeader* ether, socket* s);
 
 void sendMqttConnect(etherHeader *ether, socket *s, uint8_t flags, char* clientID);
-void sendMqttSubscribe(etherHeader *ether, socket *s, uint16_t packetIdent, char* topicName, uint8_t qosType);
+void sendMqttSubscribe(etherHeader *ether, socket *s, char* topicName);
+void sendMqttPublish(etherHeader *ether, socket *s, char* topicName, char* topicData);
 
 
 #endif

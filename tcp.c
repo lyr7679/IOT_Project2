@@ -128,7 +128,7 @@ void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[
 
     uint16_t total_offset = 0;
 
-    total_offset |= (tcpLength / 4 << OFS_SHIFT) | flags;
+    total_offset |= (5 << OFS_SHIFT) | flags;
 
     //tcp->offsetFields = htons(SYN);
     //tcp->offsetFields = (ipHeaderLength << 10) | SYN;

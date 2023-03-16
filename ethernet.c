@@ -72,6 +72,8 @@
 #define EEPROM_ERASED      0xFFFFFFFF
 
 bool connectCommand = false;
+char *topicName;
+char *topicData;
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
@@ -314,6 +316,26 @@ void processShell()
                 tcpAckFinFlag = 1;
                 tcpState = TCP_FIN_WAIT_2;
             }
+            if (strcmp(token, "publish") == 0)
+            {
+                token = strtok(NULL, " ");
+                topicName = token;
+
+                token = strtok(NULL, "\0");
+                topicData = token;
+
+                mqttPubFlag = 1;
+            }
+            if (strcmp(token, "subscribe") == 0)
+            {
+                token = strtok(NULL, " ");
+                topicName = token;
+
+//                token = strtok(NULL, "\0");
+//                topicData = token;
+
+                mqttSubFlag = 1;
+            }
             if (strcmp(token, "status") == 0)
             {
                 displayStatusInfo();
@@ -445,12 +467,18 @@ void checkPending(etherHeader *ether, socket *s)
         sendMqttConnect(ether, s, CLEAN_SESH, "raquel");
         mqttConnFlag = 0;
     }
-//
-//    if(tcpSynFlag)
-//    {
-//        sendTcpMessage(ether, s, SYN, NULL, 0);
-//        tcpSynFlag = 0;
-//    }
+
+    if(mqttPubFlag)
+    {
+        sendMqttPublish(ether, s, topicName, topicData);
+        mqttPubFlag = 0;
+    }
+
+    if(mqttSubFlag)
+    {
+        sendMqttSubscribe(ether, s, topicName);
+        mqttSubFlag = 0;
+    }
 }
 //-----------------------------------------------------------------------------
 // Main
