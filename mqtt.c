@@ -55,6 +55,31 @@ uint8_t encodeLength(uint8_t X)
     //return encodedByte;
 }
 
+void mqttGetState(char **mqtt_str)
+{
+    switch(tcpState)
+    {
+    case MQTT_DISCONNECTED:
+        *mqtt_str = "CLOSED";
+        break;
+//    case MQTT_SYN_SENT:
+//        *mqtt_str = "SYN_SENT";
+//        break;
+    case MQTT_CONNECTED:
+        *mqtt_str = "CONNECTED";
+        break;
+//    case MQTT_FIN_WAIT_2:
+//        *mqtt_str = "FIN_WAIT_2";
+//        break;
+//    case MQTT_LAST_ACK:
+//        *mqtt_str = "LAST_ACK";
+//        break;
+//    case MQTT_TIME_WAIT:
+//        *mqtt_str = "TIME_WAIT";
+//        break;
+    }
+}
+
 void processMqtt(etherHeader* ether, socket* s)
 {
 

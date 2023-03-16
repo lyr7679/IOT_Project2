@@ -184,6 +184,7 @@ void displayStatusInfo()
     uint8_t i;
     char str[10];
     char *tcp_str;
+    char *mqtt_str;
     uint8_t ip[4];
 
     getIpAddress(ip);
@@ -208,6 +209,11 @@ void displayStatusInfo()
     }
 
     //display MQTT connection state
+    putcUart0('\n');
+    tcpGetState(&mqtt_str);
+    putsUart0("  MQTT STATE:  ");
+    putsUart0(mqtt_str);
+    putcUart0('\n');
 
     putcUart0('\n');
     tcpGetState(&tcp_str);
@@ -496,6 +502,8 @@ int main(void)
     etherHeader *data = (etherHeader*) buffer;
     socket s;
     tcpState = TCP_CLOSED;
+    mqttState = MQTT_DISCONNECTED;
+    uint8_t ip[4];
 
 
 
@@ -530,29 +538,21 @@ int main(void)
 
     s.localPort = 65530;
     s.remotePort = 1883;
-//    s.remoteHwAddress[0] = 2;
-//    s.remoteHwAddress[1] = 3;
-//    s.remoteHwAddress[2] = 4;
-//    s.remoteHwAddress[3] = 5;
-//    s.remoteHwAddress[4] = 6;
-//    s.remoteHwAddress[5] = 72;
 
-//    s.remoteHwAddress[0] = 0x34;
-//    s.remoteHwAddress[1] = 0x17;
-//    s.remoteHwAddress[2] = 0xEB;
-//    s.remoteHwAddress[3] = 0xD9;
-//    s.remoteHwAddress[4] = 0xD1;
-//    s.remoteHwAddress[5] = 0x6F;
+    getIpMqttBrokerAddress(ip);
+    if(ip[0] != 0)
+    {
+        arpReqFlag = 1;
+        connectCommand = true;
+    }
 
 
-    s.remoteIpAddress[0] = 192;
-    s.remoteIpAddress[1] = 168;
-    s.remoteIpAddress[2] = 1;
-    s.remoteIpAddress[3] = 1;
+//    s.remoteIpAddress[0] = 192;
+//    s.remoteIpAddress[1] = 168;
+//    s.remoteIpAddress[2] = 1;
+//    s.remoteIpAddress[3] = 1;
 
     s.sequenceNumber = random32();
-
-    //sendTcpMessage(data, &s, SYN, NULL, 0);
 
 
     while (true)

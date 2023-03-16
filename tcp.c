@@ -353,6 +353,7 @@ void processTcp(etherHeader *ether, socket *s)
             if(tcpIsAck(ether))
             {
                 stopTimer(tcpTimer);
+                mqttState = MQTT_DISCONNECTED;
                 tcpState = TCP_CLOSED;
             }
             break;
@@ -379,6 +380,7 @@ void processTcp(etherHeader *ether, socket *s)
 
         case TCP_TIME_WAIT:
             //wait for specified amount of time
+            mqttState = MQTT_DISCONNECTED;
             tcpState = TCP_CLOSED;
             break;
     }
