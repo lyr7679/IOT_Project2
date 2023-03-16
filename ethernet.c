@@ -314,6 +314,7 @@ void processShell()
             if (strcmp(token, "disconnect") == 0)
             {
                 tcpAckFinFlag = 1;
+                //restartTimer(tcpTimer);
                 tcpState = TCP_FIN_WAIT_2;
             }
             if (strcmp(token, "publish") == 0)

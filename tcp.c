@@ -66,6 +66,36 @@ bool isTcp(etherHeader* ether)
 
 // TODO: Add functions here
 
+tcpTimer()
+{
+    switch(tcpState)
+    {
+    case TCP_CLOSED:
+    {
+
+    }
+    break;
+    case TCP_SYN_SENT:
+    {
+        tcpSynFlag = 1;
+    }
+        break;
+    case TCP_ESTABLISHED:
+    {
+
+    }
+        break;
+    case TCP_FIN_WAIT_2:
+        tcpAckFinFlag = 1;
+        break;
+    case TCP_LAST_ACK:
+        tcpAckFinFlag = 1;
+        break;
+    case TCP_TIME_WAIT:
+        break;
+    }
+}
+
 void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[], uint16_t dataSize)
 {
     uint8_t i;
@@ -140,6 +170,7 @@ void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[
          s->sequenceNumber = random32();
          s->acknowledgementNumber = 0;
          tcpState = TCP_SYN_SENT;
+         startPeriodicTimer(tcpTimer, 5);
      }
 
      tcp->sequenceNumber = htonl(s->sequenceNumber);
@@ -280,6 +311,7 @@ void processTcp(etherHeader *ether, socket *s)
             //putsUart0("\nstate: SYN_SENT\n");
             if(tcpIsSyn(ether) && tcpIsAck(ether))
             {
+                stopTimer(tcpTimer);
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFlag = 1;
                 tcpState = TCP_ESTABLISHED;
@@ -297,7 +329,7 @@ void processTcp(etherHeader *ether, socket *s)
             {
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFinFlag = 1;
-                //start timer waiting for ack
+                restartTimer(tcpTimer);
                 tcpState = TCP_LAST_ACK;
             }
             //active close
@@ -320,6 +352,7 @@ void processTcp(etherHeader *ether, socket *s)
         case TCP_LAST_ACK:
             if(tcpIsAck(ether))
             {
+                stopTimer(tcpTimer);
                 tcpState = TCP_CLOSED;
             }
             break;
@@ -337,6 +370,7 @@ void processTcp(etherHeader *ether, socket *s)
             s->sequenceNumber = htonl(tcp->acknowledgementNumber);
             if(tcpIsFin(ether) && tcpIsAck(ether))
             {
+                stopTimer(tcpTimer);
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFlag = 1;
                 tcpState = TCP_TIME_WAIT;
