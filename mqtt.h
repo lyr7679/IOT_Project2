@@ -42,7 +42,7 @@
 #define MQTT_CONNECTED    12
 #define MQTT_PUBLISH      13
 #define MQTT_SUBSCRIBE    14
-#define MQTT_DISCONNECTED   15
+#define MQTT_DISCONNECT   15
 
 //MQTT Flags
 #define WILL 0x04
@@ -52,10 +52,11 @@
 #define PSWD 0x40
 #define USRNAME 0x80
 
-uint8_t mqttState;
 uint8_t mqttConnFlag;
 uint8_t mqttPubFlag;
 uint8_t mqttSubFlag;
+uint8_t mqttUnsubFlag;
+uint8_t mqttDisconnFlag;
 
 typedef struct _mqttHeader
 {
@@ -106,12 +107,14 @@ typedef struct _mqttPublishPayload
 } mqttPublishPayload;
 
 uint8_t encodeLength(uint8_t X);
-void mqttGetState(char **mqtt_str);
+
+bool isPub(etherHeader* ether);
 void processMqtt(etherHeader* ether, socket* s);
 
 void sendMqttConnect(etherHeader *ether, socket *s, uint8_t flags, char* clientID);
 void sendMqttSubscribe(etherHeader *ether, socket *s, char* topicName);
+void sendMqttUnsub(etherHeader *ether, socket *s, char* topicName);
 void sendMqttPublish(etherHeader *ether, socket *s, char* topicName, char* topicData);
-
+void sendMqttDisconnect(etherHeader *ether, socket *s);
 
 #endif

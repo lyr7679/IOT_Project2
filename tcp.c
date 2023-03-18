@@ -23,7 +23,7 @@
 #include "tm4c123gh6pm.h"
 #include "uart0.h"
 #include "arp.h"
-//#include "mqtt.h"
+#include "wait.h"
 
 // ------------------------------------------------------------------------------
 //  Globals
@@ -65,36 +65,6 @@ bool isTcp(etherHeader* ether)
 
 
 // TODO: Add functions here
-
-tcpTimer()
-{
-    switch(tcpState)
-    {
-    case TCP_CLOSED:
-    {
-
-    }
-    break;
-    case TCP_SYN_SENT:
-    {
-        tcpSynFlag = 1;
-    }
-        break;
-    case TCP_ESTABLISHED:
-    {
-
-    }
-        break;
-    case TCP_FIN_WAIT_2:
-        tcpAckFinFlag = 1;
-        break;
-    case TCP_LAST_ACK:
-        tcpAckFinFlag = 1;
-        break;
-    case TCP_TIME_WAIT:
-        break;
-    }
-}
 
 void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[], uint16_t dataSize)
 {
@@ -170,7 +140,6 @@ void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[
          s->sequenceNumber = random32();
          s->acknowledgementNumber = 0;
          tcpState = TCP_SYN_SENT;
-         startPeriodicTimer(tcpTimer, 5);
      }
 
      tcp->sequenceNumber = htonl(s->sequenceNumber);
@@ -311,7 +280,6 @@ void processTcp(etherHeader *ether, socket *s)
             //putsUart0("\nstate: SYN_SENT\n");
             if(tcpIsSyn(ether) && tcpIsAck(ether))
             {
-                stopTimer(tcpTimer);
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFlag = 1;
                 tcpState = TCP_ESTABLISHED;
@@ -322,22 +290,14 @@ void processTcp(etherHeader *ether, socket *s)
             break;
 
         case TCP_ESTABLISHED:
-            //passive close
-            putsUart0("\nstate: ESTABLISHED\n");
             s->sequenceNumber = htonl(tcp->acknowledgementNumber);
+            //passive close
             if(tcpIsFin(ether) && tcpIsAck(ether))
             {
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFinFlag = 1;
-                restartTimer(tcpTimer);
-                tcpState = TCP_LAST_ACK;
-            }
-            //active close
-            else if( 0 == 1 /*flag is set for an active close?*/)
-            {
-                tcpFinFlag = 1;
                 //start timer waiting for ack
-                tcpState = TCP_FIN_WAIT_1;
+                tcpState = TCP_LAST_ACK;
             }
             //mqtt data coming in
             else if(tcpIsPsh(ether) && tcpIsAck(ether))
@@ -345,15 +305,14 @@ void processTcp(etherHeader *ether, socket *s)
                 dataSize = htons(ip->length) - (ip->size * 4) - sizeof(tcpHeader);
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + dataSize;
                 tcpAckFlag = 1;
-                //processMqtt(ether, s);
+                processMqtt(ether, s);
             }
             break;
 
         case TCP_LAST_ACK:
             if(tcpIsAck(ether))
             {
-                stopTimer(tcpTimer);
-                mqttState = MQTT_DISCONNECTED;
+                //waitMicrosecond(10000000);
                 tcpState = TCP_CLOSED;
             }
             break;
@@ -371,7 +330,6 @@ void processTcp(etherHeader *ether, socket *s)
             s->sequenceNumber = htonl(tcp->acknowledgementNumber);
             if(tcpIsFin(ether) && tcpIsAck(ether))
             {
-                stopTimer(tcpTimer);
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFlag = 1;
                 tcpState = TCP_TIME_WAIT;
@@ -380,7 +338,6 @@ void processTcp(etherHeader *ether, socket *s)
 
         case TCP_TIME_WAIT:
             //wait for specified amount of time
-            mqttState = MQTT_DISCONNECTED;
             tcpState = TCP_CLOSED;
             break;
     }
