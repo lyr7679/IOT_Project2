@@ -63,6 +63,31 @@ uint8_t encodeLength(uint8_t X)
     //return encodedByte;
 }
 
+void mqttGetState(char **mqtt_str)
+{
+    switch(mqttState)
+    {
+    case MQTT_DISCONNECT:
+        *mqtt_str = "DISCONNECTED";
+        break;
+    case MQTT_CONNECT_SENT:
+        *mqtt_str = "CONNECT_SENT";
+        break;
+    case MQTT_CONNECTED:
+        *mqtt_str = "CONNECTED";
+        break;
+    case MQTT_PUBLISH:
+        *mqtt_str = "PUBLISH";
+        break;
+    case MQTT_SUBSCRIBE:
+        *mqtt_str = "SUBSCRIBE";
+        break;
+    case MQTT_UNSUBSCRIBE:
+        *mqtt_str = "UNSUBSCRIBE";
+        break;
+    }
+}
+
 bool isPub(etherHeader* ether)
 {
     ipHeader *ip = (ipHeader*)ether->data;
@@ -118,6 +143,7 @@ void processMqtt(etherHeader* ether, socket* s)
         {
             str[j] = (char) tcp->data[i++];
         }
+        putcUart0('\n');
         putsUart0("Topic Name: ");
         putsUart0(str);
         putcUart0('\n');

@@ -184,8 +184,10 @@ void displayStatusInfo()
     uint8_t i;
     char str[10];
     char *tcp_str;
+    char *mqtt_str;
     uint8_t ip[4];
 
+    putcUart0('\n');
     getIpAddress(ip);
     putsUart0("  IP:    ");
     for (i = 0; i < IP_ADD_LENGTH; i++)
@@ -207,7 +209,10 @@ void displayStatusInfo()
             putcUart0('.');
     }
 
-    //display MQTT connection state
+    putcUart0('\n');
+    mqttGetState(&mqtt_str);
+    putsUart0("  MQTT STATE:  ");
+    putsUart0(mqtt_str);
 
     putcUart0('\n');
     tcpGetState(&tcp_str);
@@ -425,6 +430,11 @@ void processShell()
                 putsUart0("  ifconfig\r");
                 putsUart0("  reboot\r");
                 putsUart0("  set ip|gw|dns|time|mqtt|sn w.x.y.z\r");
+                putsUart0("  status\r");
+                putsUart0("  connect\r");
+                putsUart0("  disconnect\r");
+                putsUart0("  publish topic topic_data\r");
+                putsUart0("  subscribe topic\r");
             }
         }
     }
@@ -472,30 +482,35 @@ void checkPending(etherHeader *ether, socket *s)
     }
     if(mqttConnFlag)
     {
+        //mqttState = MQTT_CONNECT_SENT;
         sendMqttConnect(ether, s, CLEAN_SESH, "raquel");
         mqttConnFlag = 0;
     }
 
     if(mqttPubFlag)
     {
+        mqttState = MQTT_PUBLISH;
         sendMqttPublish(ether, s, topicName, topicData);
         mqttPubFlag = 0;
     }
 
     if(mqttSubFlag)
     {
+        mqttState = MQTT_SUBSCRIBE;
         sendMqttSubscribe(ether, s, topicName);
         mqttSubFlag = 0;
     }
 
     if(mqttUnsubFlag)
     {
+        mqttState = MQTT_UNSUBSCRIBE;
         sendMqttUnsub(ether, s, topicName);
         mqttUnsubFlag = 0;
     }
 
     if(mqttDisconnFlag)
     {
+        mqttState = MQTT_DISCONNECT;
         sendMqttDisconnect(ether, s);
         mqttDisconnFlag = 0;
     }
@@ -515,6 +530,7 @@ int main(void)
     etherHeader *data = (etherHeader*) buffer;
     socket s;
     tcpState = TCP_CLOSED;
+    mqttState = MQTT_DISCONNECT;
 
 
 
@@ -549,20 +565,6 @@ int main(void)
 
     s.localPort = 65530;
     s.remotePort = 1883;
-//    s.remoteHwAddress[0] = 2;
-//    s.remoteHwAddress[1] = 3;
-//    s.remoteHwAddress[2] = 4;
-//    s.remoteHwAddress[3] = 5;
-//    s.remoteHwAddress[4] = 6;
-//    s.remoteHwAddress[5] = 72;
-
-//    s.remoteHwAddress[0] = 0x34;
-//    s.remoteHwAddress[1] = 0x17;
-//    s.remoteHwAddress[2] = 0xEB;
-//    s.remoteHwAddress[3] = 0xD9;
-//    s.remoteHwAddress[4] = 0xD1;
-//    s.remoteHwAddress[5] = 0x6F;
-
 
     s.remoteIpAddress[0] = 192;
     s.remoteIpAddress[1] = 168;
@@ -570,9 +572,6 @@ int main(void)
     s.remoteIpAddress[3] = 1;
 
     s.sequenceNumber = random32();
-
-    //sendTcpMessage(data, &s, SYN, NULL, 0);
-
 
     while (true)
     {

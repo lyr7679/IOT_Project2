@@ -283,6 +283,7 @@ void processTcp(etherHeader *ether, socket *s)
                 s->acknowledgementNumber = htonl(tcp->sequenceNumber) + 1;
                 tcpAckFlag = 1;
                 tcpState = TCP_ESTABLISHED;
+                mqttState = MQTT_CONNECTED;
 
                 //after established we want to go "connected" state
                 mqttConnFlag = 1;
@@ -290,6 +291,7 @@ void processTcp(etherHeader *ether, socket *s)
             break;
 
         case TCP_ESTABLISHED:
+            mqttState = MQTT_CONNECTED;
             s->sequenceNumber = htonl(tcp->acknowledgementNumber);
             //passive close
             if(tcpIsFin(ether) && tcpIsAck(ether))
@@ -313,6 +315,7 @@ void processTcp(etherHeader *ether, socket *s)
             if(tcpIsAck(ether))
             {
                 //waitMicrosecond(10000000);
+                mqttState = MQTT_DISCONNECT;
                 tcpState = TCP_CLOSED;
             }
             break;
@@ -338,6 +341,7 @@ void processTcp(etherHeader *ether, socket *s)
 
         case TCP_TIME_WAIT:
             //wait for specified amount of time
+            mqttState = MQTT_DISCONNECT;
             tcpState = TCP_CLOSED;
             break;
     }
