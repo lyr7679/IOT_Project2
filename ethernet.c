@@ -444,6 +444,18 @@ void checkPending(etherHeader *ether, socket *s)
 {
     if(arpReqFlag)
     {
+        uint8_t i;
+        uint8_t mqtt_ip[4];
+        uint8_t ip2[] = {0, 0, 0, 0};
+        getIpMqttBrokerAddress(mqtt_ip);
+
+        if(memcmp(mqtt_ip, ip2, sizeof(mqtt_ip)) != 0)
+        {
+            for(i = 0; i < IP_ADD_LENGTH; i++)
+            {
+                 s->remoteIpAddress[i] = mqtt_ip[i];
+            }
+        }
         uint8_t ip[4];
         getIpAddress(ip);
         sendArpRequest(ether, ip, s->remoteIpAddress);
@@ -529,10 +541,11 @@ int main(void)
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader*) buffer;
     socket s;
+    uint8_t ip[4];
+    int i, check = 0;
+
     tcpState = TCP_CLOSED;
     mqttState = MQTT_DISCONNECT;
-
-
 
     // Init controller
     initHw();
@@ -553,7 +566,6 @@ int main(void)
     // Init EEPROM
     initEeprom();
     readConfiguration();
-
     setPinValue(GREEN_LED, 1);
     waitMicrosecond(100000);
     setPinValue(GREEN_LED, 0);
@@ -566,10 +578,28 @@ int main(void)
     s.localPort = 65530;
     s.remotePort = 1883;
 
-    s.remoteIpAddress[0] = 192;
-    s.remoteIpAddress[1] = 168;
-    s.remoteIpAddress[2] = 1;
-    s.remoteIpAddress[3] = 1;
+//    s.remoteIpAddress[0] = 192;
+//    s.remoteIpAddress[1] = 168;
+//    s.remoteIpAddress[2] = 1;
+//    s.remoteIpAddress[3] = 1;
+
+    getIpMqttBrokerAddress(ip);
+
+    for(i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        if(ip[i] == 0)
+            check++;
+    }
+
+    if(check != 4)
+    {
+        for(i = 0; i < IP_ADD_LENGTH; i++)
+        {
+             s.remoteIpAddress[i] = ip[i];
+        }
+        arpReqFlag = 1;
+        connectCommand = true;
+    }
 
     s.sequenceNumber = random32();
 

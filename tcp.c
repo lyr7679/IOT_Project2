@@ -351,10 +351,12 @@ void processArpResponse(etherHeader *ether, socket *s)
 {
     //fill in hw address
     uint8_t i;
+    uint8_t ip[4];
+    getIpMqttBrokerAddress(ip);
     arpPacket *arp = (arpPacket*)ether->data;
 
     //check source ip matches hardcoded ip (192.168.1.1)
-    if(memcmp(arp->sourceIp, s->remoteIpAddress, sizeof(arp->sourceIp)) == 0)
+    if(memcmp(arp->sourceIp, ip, sizeof(arp->sourceIp)) == 0)
     {
         for(i = 0; i < HW_ADD_LENGTH; i++)
         {
