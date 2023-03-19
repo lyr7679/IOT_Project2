@@ -74,6 +74,8 @@
 bool connectCommand = false;
 char *topicName;
 char *topicData;
+
+uint8_t arpTimer = 0;
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
@@ -440,6 +442,12 @@ void processShell()
     }
 }
 
+void arpTimeout()
+{
+    arpReqFlag = 1;
+    restartTimer(arpTimeout);
+}
+
 void checkPending(etherHeader *ether, socket *s)
 {
     if(arpReqFlag)
@@ -460,6 +468,14 @@ void checkPending(etherHeader *ether, socket *s)
         getIpAddress(ip);
         sendArpRequest(ether, ip, s->remoteIpAddress);
         arpReqFlag = 0;
+
+        if(!arpTimer)
+        {
+            startOneshotTimer(arpTimeout, 3);
+            arpTimer++;
+        }
+        else
+            restartTimer(arpTimeout);
     }
 
     if(arpResFlag)
@@ -634,6 +650,7 @@ int main(void)
 
             if(isArpResponse(data))
             {
+                stopTimer(arpTimeout);
                 processArpResponse(data, &s);
 
                 if(connectCommand)
