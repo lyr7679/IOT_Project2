@@ -206,6 +206,7 @@ void sendMqttConnect(etherHeader *ether, socket *s, uint8_t flags, char* clientI
 void sendMqttSubscribe(etherHeader *ether, socket *s, char* topicName)
 {
     uint16_t i = 0, j = 0;
+    uint8_t data_arr[100];
     ipHeader *ip = (ipHeader*)ether->data;
     tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
     mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
@@ -246,12 +247,15 @@ void sendMqttSubscribe(etherHeader *ether, socket *s, char* topicName)
 
     uint16_t dataSize = 2 + mqtt_packet->remainingLength;
 
-    sendTcpMessage(ether, s, PSH | ACK, (uint8_t*) mqtt_packet, dataSize);
+    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
+
+    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
 }
 
 void sendMqttPublish(etherHeader *ether, socket *s, char* topicName, char* topicData)
 {
     int i = 0, j = 0;
+    uint8_t data_arr[100];
     ipHeader *ip = (ipHeader*)ether->data;
     tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
     mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
@@ -290,12 +294,15 @@ void sendMqttPublish(etherHeader *ether, socket *s, char* topicName, char* topic
     uint16_t dataSize = 2 + mqtt_packet->remainingLength;
     ///uint16_t dataSize = 2 + i;
 
-    sendTcpMessage(ether, s, PSH | ACK, (uint8_t*) mqtt_packet, dataSize);
+    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
+
+    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
 }
 
 void sendMqttUnsub(etherHeader *ether, socket *s, char* topicName)
 {
     int i = 0, j = 0;
+    uint8_t data_arr[100];
     ipHeader *ip = (ipHeader*)ether->data;
     tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
     mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
@@ -335,12 +342,15 @@ void sendMqttUnsub(etherHeader *ether, socket *s, char* topicName)
     uint16_t dataSize = 2 + mqtt_packet->remainingLength;
     ///uint16_t dataSize = 2 + i;
 
-    sendTcpMessage(ether, s, PSH | ACK, (uint8_t*) mqtt_packet, dataSize);
+    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
+
+    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
 }
 
 void sendMqttDisconnect(etherHeader *ether, socket *s)
 {
     ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t data_arr[100];
     tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
     mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
 
@@ -349,7 +359,9 @@ void sendMqttDisconnect(etherHeader *ether, socket *s)
 
     uint16_t dataSize = 2 + mqtt_packet->remainingLength;
 
-    sendTcpMessage(ether, s, PSH | ACK, (uint8_t*) mqtt_packet, dataSize);
+    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
+
+    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
 }
 
 

@@ -159,10 +159,20 @@ void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[
     sum += htons(tcpLength);
     //sumIpWords(&tcp->length, 2, &sum);
 
+    copyData = tcp->data;
+
+    for (i = 0; i < dataSize; i++)
+        copyData[i] = data[i];
+
     // add tcp header
     tcp->checksum = 0;
     sumIpWords(tcp, tcpLength, &sum);
     tcp->checksum = getIpChecksum(sum);
+
+    copyData = tcp->data;
+
+    for (i = 0; i < dataSize; i++)
+        copyData[i] = data[i];
 
     if(tcpState == TCP_TIME_WAIT)
         tcpState = TCP_CLOSED;
