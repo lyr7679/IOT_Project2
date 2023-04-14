@@ -189,7 +189,7 @@ void sendMqttConnect(etherHeader *ether, socket *s, uint8_t flags, char* clientI
 
     connect->protocolLevel = MQTT_PROTOCOL;
     connect->controlFlags = flags;
-    connect->keepAliveTime = htons(KEEP_ALIVE_LONG);
+    connect->keepAliveTime = 60;
 
     mqttConnectPayload* payload = (mqttConnectPayload*)connect->data;
     payload->msb_lsb = htons(strlen(clientID));

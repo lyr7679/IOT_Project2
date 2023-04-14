@@ -453,29 +453,31 @@ void checkPending(etherHeader *ether, socket *s)
     if(arpReqFlag)
     {
         uint8_t i;
-        uint8_t mqtt_ip[4];
-        uint8_t ip2[] = {0, 0, 0, 0};
-        getIpMqttBrokerAddress(mqtt_ip);
+        uint8_t localip[4];
+        getIpAddress(localip);
+//        uint8_t mqtt_ip[4];
+//        uint8_t ip2[] = {0, 0, 0, 0};
+//        getIpMqttBrokerAddress(mqtt_ip);
+//
+//        if(memcmp(mqtt_ip, ip2, sizeof(mqtt_ip)) != 0)
+//        {
+//            for(i = 0; i < IP_ADD_LENGTH; i++)
+//            {
+//                 s->remoteIpAddress[i] = mqtt_ip[i];
+//            }
+//        }
+        checkEmptyBrokerAddress(s);
 
-        if(memcmp(mqtt_ip, ip2, sizeof(mqtt_ip)) != 0)
-        {
-            for(i = 0; i < IP_ADD_LENGTH; i++)
-            {
-                 s->remoteIpAddress[i] = mqtt_ip[i];
-            }
-        }
-        uint8_t ip[4];
-        getIpAddress(ip);
-        sendArpRequest(ether, ip, s->remoteIpAddress);
+        sendArpRequest(ether, localip, s->remoteIpAddress);
         arpReqFlag = 0;
 
-        if(!arpTimer)
-        {
-            startOneshotTimer(arpTimeout, 3);
-            arpTimer++;
-        }
-        else
-            restartTimer(arpTimeout);
+//        if(!arpTimer)
+//        {
+//            startOneshotTimer(arpTimeout, 3);
+//            arpTimer++;
+//        }
+//        else
+//            restartTimer(arpTimeout);
     }
 
     if(arpResFlag)
@@ -543,6 +545,71 @@ void checkPending(etherHeader *ether, socket *s)
         mqttDisconnFlag = 0;
     }
 }
+
+void checkEmptyBrokerAddress(socket *s)
+{
+    uint8_t ip[4];
+    int i, check = 0;
+
+    getIpMqttBrokerAddress(ip);
+
+    for(i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        if(ip[i] == 0)
+            check++;
+    }
+
+    if(check != 4)
+    {
+        checkRemoteBrokerAddress(s);
+
+//        for(i = 0; i < IP_ADD_LENGTH; i++)
+//        {
+//             s->remoteIpAddress[i] = ip[i];
+//        }
+//        arpReqFlag = 1;
+//        connectCommand = true;
+    }
+}
+
+void checkRemoteBrokerAddress(socket *s)
+{
+    uint8_t mqttip[4];
+    uint8_t localip[4];
+    uint8_t gwip[4];
+    int i, check = 0;
+
+    getIpAddress(localip);
+    getIpMqttBrokerAddress(mqttip);
+    getIpGatewayAddress(gwip);
+
+    for(i = 0; i < IP_ADD_LENGTH - 1; i++)
+    {
+        if(localip[i] == mqttip[i])
+            check++;
+    }
+
+    if(check == 3)
+    {
+        for(i = 0; i < IP_ADD_LENGTH; i++)
+        {
+             s->remoteIpAddress[i] = mqttip[i];
+        }
+        arpReqFlag = 1;
+        connectCommand = true;
+    }
+    else
+    {
+        //send arp request to gateway ip first to get
+        //gateway MAC, then use mqtt ip and gateway MAC
+        for(i = 0; i < IP_ADD_LENGTH; i++)
+        {
+             s->remoteIpAddress[i] = gwip[i];
+        }
+        arpReqFlag = 1;
+        connectCommand = true;
+    }
+}
 //-----------------------------------------------------------------------------
 // Main
 //-----------------------------------------------------------------------------
@@ -557,8 +624,6 @@ int main(void)
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader*) buffer;
     socket s;
-    uint8_t ip[4];
-    int i, check = 0;
 
     tcpState = TCP_CLOSED;
     mqttState = MQTT_DISCONNECT;
@@ -591,7 +656,7 @@ int main(void)
     // RTOS and interrupts would greatly improve this code,
     // but the goal here is simplicity
 
-    s.localPort = 65530;
+    s.localPort = 65532;
     s.remotePort = 1883;
 
 //    s.remoteIpAddress[0] = 192;
@@ -599,23 +664,8 @@ int main(void)
 //    s.remoteIpAddress[2] = 1;
 //    s.remoteIpAddress[3] = 1;
 
-    getIpMqttBrokerAddress(ip);
-
-    for(i = 0; i < IP_ADD_LENGTH; i++)
-    {
-        if(ip[i] == 0)
-            check++;
-    }
-
-    if(check != 4)
-    {
-        for(i = 0; i < IP_ADD_LENGTH; i++)
-        {
-             s.remoteIpAddress[i] = ip[i];
-        }
-        arpReqFlag = 1;
-        connectCommand = true;
-    }
+    checkEmptyBrokerAddress(&s);
+    //checkRemoteBrokerAddress(&s);
 
     s.sequenceNumber = random32();
 

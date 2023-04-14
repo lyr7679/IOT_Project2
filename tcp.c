@@ -361,16 +361,32 @@ void processArpResponse(etherHeader *ether, socket *s)
 {
     //fill in hw address
     uint8_t i;
-    uint8_t ip[4];
-    getIpMqttBrokerAddress(ip);
+    uint8_t mqttip[4];
+    uint8_t gwip[4];
+    getIpMqttBrokerAddress(mqttip);
+    getIpGatewayAddress(gwip);
     arpPacket *arp = (arpPacket*)ether->data;
 
-    //check source ip matches hardcoded ip (192.168.1.1)
-    if(memcmp(arp->sourceIp, ip, sizeof(arp->sourceIp)) == 0)
+    //check source ip matches mqtt ip OR gateway ip
+    //if gateway ip, save off MAC address but change
+    //socket remote ip back to the mqtt ip for msg sending
+    if(memcmp(arp->sourceIp, mqttip, sizeof(arp->sourceIp)) == 0)
     {
         for(i = 0; i < HW_ADD_LENGTH; i++)
         {
             s->remoteHwAddress[i] = ether->sourceAddress[i];
+        }
+    }
+    else if(memcmp(arp->sourceIp, gwip, sizeof(arp->sourceIp)) == 0)
+    {
+        for(i = 0; i < HW_ADD_LENGTH; i++)
+        {
+            s->remoteHwAddress[i] = ether->sourceAddress[i];
+        }
+
+        for(i = 0; i < IP_ADD_LENGTH; i++)
+        {
+             s->remoteIpAddress[i] = mqttip[i];
         }
     }
 
