@@ -23,6 +23,7 @@
 //*****************************************************************************
 
 #include <stdint.h>
+#include "timer.h"
 
 //*****************************************************************************
 //
@@ -54,8 +55,8 @@ extern uint32_t __STACK_TOP;
 // External declarations for the interrupt handlers used by the application.
 //
 //*****************************************************************************
-extern void tickIsr();
-
+// To be added by user
+extern void tickIsr(void);
 //*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to

@@ -21,11 +21,13 @@
 
 typedef void (*_callback)();
 
+#include <stdbool.h>
 //-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------
 
 void initTimer();
+uint32_t getUptime(void);
 bool startOneshotTimer(_callback callback, uint32_t seconds);
 bool startPeriodicTimer(_callback callback, uint32_t seconds);
 bool stopTimer(_callback callback);

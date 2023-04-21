@@ -71,14 +71,215 @@
 #define EEPROM_MQTT        7
 #define EEPROM_ERASED      0xFFFFFFFF
 
-bool connectCommand = false;
-char *topicName;
-char *topicData;
+// Max packet is calculated as:
+// Ether frame header (18) + Max MTU (1500) + CRC (4)
+#define MAX_PACKET_SIZE 1522
 
-uint8_t arpTimer = 0;
+#define MAX_SOCKETS 5
+#define MAX_TOPICS 10
+
+#define MAX_ARP_TIMEOUT 5
+#define MAX_TCP_HANDSHAKE_TIMEOUT 5
+
+#define MQTT_DEFAULT_CONFIG_NARGS 1
+#define MQTT_DEFAULT_N_TOPICS 3
+
+
+//adafruit credentials
+#define IO_USRNAME "uta_iot"
+#define IO_KEY
+
+//-----------------------------------------------------------------------------
+// Globals                
+//-----------------------------------------------------------------------------
+
+socket sockets[MAX_SOCKETS];
+topic topics[MAX_TOPICS] = {"", "Lights", "Time", "Convo"};
+uint32_t pingTime;
+//-----------------------------------------------------------------------------
+// Flags                
+//-----------------------------------------------------------------------------
+uint8_t gf_arp_send_request;
+uint8_t gf_rx_arp;
+
+uint8_t gf_send_ping;
+uint8_t gf_rx_ping;
+
+// TCP Flags
+uint8_t gf_tcp_send_syn;
+uint8_t gf_tcp_send_ack;
+uint8_t gf_disconnect;
+uint8_t gf_tcp_send_fin;
+uint8_t gf_rx_lastAck;
+uint8_t gf_tcp_rx_synack;
+
+// MQTT Flags
+uint8_t gf_mqtt_connect;
+uint8_t gf_close_socket;
+uint8_t gf_mqtt_subscribe;
+uint8_t gf_mqtt_unsubscribe;
+uint8_t gf_mqtt_publish;
+uint8_t gf_mqtt_disconnect;
+uint8_t gf_mqtt_rx_connack;
+uint8_t gf_mqtt_rx_suback;
+uint8_t gf_mqtt_rx_unsuback;
+uint8_t gf_mqtt_connect_default;
+uint8_t gf_mqtt_subscribe_default;
+uint8_t gf_tcp_send_finack;
+
+uint8_t gf_mqtt_rx_suback_default;
+
+
+
+
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
+
+void deleteSocket(socket *s)
+{
+    uint8_t i;
+
+    for(i = 0; i < HW_ADD_LENGTH; i++)
+        s->remoteHwAddress[i] = 0;
+    for(i = 0; i < IP_ADD_LENGTH; i++)
+        s->remoteIpAddress[i] = 0;
+    s->localPort = 0;
+    s->remotePort = 0;
+    s->id = 0;
+    s->state = 0;
+}
+
+
+void closeSocketCallback()
+{
+    if(!gf_close_socket)    
+        return;
+    gf_disconnect = gf_close_socket;
+    gf_close_socket = 0;
+}
+
+void tcpHandshakeTimeoutCallback()
+{
+    static uint8_t count = 0;
+    if(!gf_tcp_rx_synack || gf_tcp_send_syn)
+        return;
+
+    count++;
+    if(count >= MAX_TCP_HANDSHAKE_TIMEOUT)
+    {
+        putsUart0("Unable to connect");
+        putcUart0('\n');
+        deleteSocket(&(sockets[gf_rx_arp]));
+        gf_mqtt_connect_default = 0;
+        gf_mqtt_connect = 0;
+        gf_tcp_rx_synack = 0;
+        count = 0;
+    }
+    else
+    {
+        restartTimer(tcpHandshakeTimeoutCallback);
+        gf_tcp_send_syn = gf_tcp_rx_synack;
+        gf_tcp_rx_synack = 0;
+        putsUart0("Tcp timeout\n");
+    }
+}
+
+void arpRequestTimeoutCallback()
+{
+    static uint8_t count = 0;
+    if(!gf_rx_arp || gf_arp_send_request)
+        return;
+
+    count++;
+    if(count >= MAX_ARP_TIMEOUT)
+    {
+        putsUart0("Unable to reach ip");
+        putcUart0('\n');
+        deleteSocket(&(sockets[gf_rx_arp]));
+        gf_mqtt_connect_default = 0;
+        gf_mqtt_connect = 0;
+        gf_rx_arp = 0;
+        count = 0;
+    }
+    else
+    {
+        restartTimer(arpRequestTimeoutCallback);
+        gf_arp_send_request = gf_rx_arp;
+        gf_rx_arp = 0;
+        putsUart0("Arp timeout\n");
+    }
+}
+
+void setSocketHwAddress(etherHeader *ether, socket *s)
+{
+    arpPacket *arp = (arpPacket*)(ether->data);
+    uint8_t i;
+    uint8_t mqtt_ip[4];
+    uint8_t gw_ip[4];
+    getIpMqttBrokerAddress(mqtt_ip);
+    getIpGatewayAddress(gw_ip);
+
+    for (i = 0; i < HW_ADD_LENGTH; i++)
+        s->remoteHwAddress[i] = arp->sourceAddress[i];
+
+    if(memcmp(arp->sourceIp, gw_ip, sizeof(arp->sourceIp)) == 0)
+    {
+        for(i = 0; i < IP_ADD_LENGTH; i++)
+        {
+             s->remoteIpAddress[i] = mqtt_ip[i];
+        }
+    }
+}
+
+void removeDelimiters(char *input, char* output, char *delimiters)
+{
+    uint8_t i, j;
+    uint8_t k = 0;
+    for (i = 0; input[i] != '\0'; i++)
+    {
+        for (j = 0; delimiters[j] != '\0'; j++)
+        {
+            if(input[i] == delimiters[j])
+            {
+                i++;
+                j = UINT8_MAX;
+                continue;
+            }
+        }
+        output[k++] = input[i];
+    }
+    output[k] = '\0';
+}
+
+uint8_t createSocket(uint16_t protocol, socket *s, uint8_t socketCount, uint8_t remote_ip[4], uint16_t remote_port)
+{
+    uint8_t i;
+    uint8_t socketNum;
+    bool found = false;
+    for(i = 1; i < socketCount && !found; i++)
+    {
+        if(s[i].state == TCP_CLOSED)
+        {
+            found = true;
+            socketNum = i;
+        }
+    }
+    if(!found)
+        return socketCount;
+    // Make local port
+    for(i = 0; i < IP_ADD_LENGTH; i++)
+        s[socketNum].remoteIpAddress[i] = remote_ip[i];
+    uint16_t temp = random32() & 0xFFFF;
+    temp &= ~0xF;
+    temp |= socketNum;
+    s[socketNum].localPort = temp;
+    s[socketNum].remotePort = remote_port;
+    s[socketNum].state = 0;
+    s[socketNum].id = protocol;
+    return socketNum;
+}
+
 
 // Initialize Hardware
 void initHw()
@@ -96,6 +297,13 @@ void initHw()
     selectPinPushPullOutput(BLUE_LED);
     selectPinDigitalInput(PUSH_BUTTON);
     enablePinPullup(PUSH_BUTTON);
+}
+
+initDefaultTimers()
+{
+    startOneshotTimer(arpRequestTimeoutCallback, 1);
+    startOneshotTimer(tcpHandshakeTimeoutCallback, 3);
+    startOneshotTimer(closeSocketCallback, 2);
 }
 
 void displayConnectionInfo()
@@ -181,47 +389,6 @@ void displayConnectionInfo()
         putsUart0("Link is down\n");
 }
 
-void displayStatusInfo()
-{
-    uint8_t i;
-    char str[10];
-    char *tcp_str;
-    char *mqtt_str;
-    uint8_t ip[4];
-
-    putcUart0('\n');
-    getIpAddress(ip);
-    putsUart0("  IP:    ");
-    for (i = 0; i < IP_ADD_LENGTH; i++)
-    {
-        snprintf(str, sizeof(str), "%"PRIu8, ip[i]);
-        putsUart0(str);
-        if (i < IP_ADD_LENGTH-1)
-            putcUart0('.');
-    }
-
-    putcUart0('\n');
-    getIpMqttBrokerAddress(ip);
-    putsUart0("  MQTT:  ");
-    for (i = 0; i < IP_ADD_LENGTH; i++)
-    {
-        snprintf(str, sizeof(str), "%"PRIu8, ip[i]);
-        putsUart0(str);
-        if (i < IP_ADD_LENGTH-1)
-            putcUart0('.');
-    }
-
-    putcUart0('\n');
-    mqttGetState(&mqtt_str);
-    putsUart0("  MQTT STATE:  ");
-    putsUart0(mqtt_str);
-
-    putcUart0('\n');
-    tcpGetState(&tcp_str);
-    putsUart0("  TCP STATE:  ");
-    putsUart0(tcp_str);
-    putcUart0('\n');
-}
 void readConfiguration()
 {
     uint32_t temp;
@@ -267,8 +434,16 @@ void readConfiguration()
 
 #define MAX_CHARS 80
 char strInput[MAX_CHARS+1];
+char mqttMessages[MQTT_MAX_ARGUMENTS][MAX_CHARS];
+uint8_t mqttFlags;
+uint8_t nargs;
 char* token;
 uint8_t count = 0;
+
+char MQTT_DEFAULT_CONFIG[MQTT_MAX_ARGUMENTS][MAX_CHARS] = {
+    "Marvin"
+};
+
 
 uint8_t asciiToUint8(const char str[])
 {
@@ -278,6 +453,59 @@ uint8_t asciiToUint8(const char str[])
     else
         sscanf(str, "%hhu", &data);
     return data;
+}
+
+uint16_t asciiToUint16(const char str[])
+{
+    uint16_t data;
+    if (str[0] == '0' && tolower(str[1]) == 'x')
+        sscanf(str, "%hx", &data);
+    else
+        sscanf(str, "%hu", &data);
+    return data;
+}
+
+bool checkRemoteBrokerAddress()
+{
+    uint8_t mqtt_ip[4];
+    uint8_t local_ip[4];
+    uint8_t gw_ip[4];
+    int i, check = 0;
+
+    getIpAddress(local_ip);
+    getIpMqttBrokerAddress(mqtt_ip);
+    getIpGatewayAddress(gw_ip);
+
+    for(i = 0; i < IP_ADD_LENGTH - 1; i++)
+    {
+        if(local_ip[i] == mqtt_ip[i])
+            check++;
+    }
+
+    if(check == 3)
+    {
+        return false;
+    }
+    else
+        return true;
+}
+
+bool checkEmptyBrokerAddress()
+{
+    uint8_t ip[4];
+    int i, check = 0;
+
+    getIpMqttBrokerAddress(ip);
+
+    for(i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        if(ip[i] == 0)
+            check++;
+    }
+
+    if(check != 4)
+        return false;
+    return true;
 }
 
 void processShell()
@@ -312,48 +540,6 @@ void processShell()
             if (strcmp(token, "reboot") == 0)
             {
                 NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
-            }
-            if (strcmp(token, "connect") == 0)
-            {
-                arpReqFlag = 1;
-                connectCommand = true;
-            }
-            if (strcmp(token, "disconnect") == 0)
-            {
-                //tcpAckFinFlag = 1;
-                //tcpState = TCP_FIN_WAIT_2;
-                mqttDisconnFlag = 1;
-            }
-            if (strcmp(token, "finish") == 0)
-            {
-                tcpAckFinFlag = 1;
-                tcpState = TCP_FIN_WAIT_2;
-            }
-            if (strcmp(token, "publish") == 0)
-            {
-                token = strtok(NULL, " ");
-                topicName = token;
-
-                token = strtok(NULL, "\0");
-                topicData = token;
-
-                mqttPubFlag = 1;
-            }
-            if (strcmp(token, "subscribe") == 0)
-            {
-                token = strtok(NULL, " ");
-                topicName = token;
-                mqttSubFlag = 1;
-            }
-            if (strcmp(token, "unsubscribe") == 0)
-            {
-                token = strtok(NULL, " ");
-                topicName = token;
-                mqttUnsubFlag = 1;
-            }
-            if (strcmp(token, "status") == 0)
-            {
-                displayStatusInfo();
             }
             if (strcmp(token, "set") == 0)
             {
@@ -425,208 +611,593 @@ void processShell()
                     writeEeprom(EEPROM_MQTT, *p32);
                 }
             }
-
             if (strcmp(token, "help") == 0)
             {
                 putsUart0("Commands:\r");
                 putsUart0("  ifconfig\r");
                 putsUart0("  reboot\r");
-                putsUart0("  set ip|gw|dns|time|mqtt|sn w.x.y.z\r");
-                putsUart0("  status\r");
-                putsUart0("  connect\r");
-                putsUart0("  disconnect\r");
-                putsUart0("  publish topic topic_data\r");
-                putsUart0("  subscribe topic\r");
+                putsUart0("  set ip | gw | dns | time | mqtt | sn w.x.y.z\r");
+            }
+            if (strcmp(token, "status") == 0)
+            {
+                putsUart0("Prints status\n");
+            }
+            if (strcmp(token, "ping") == 0)
+            {
+                uint8_t remote_ip[4];
+                for (i = 0; i < IP_ADD_LENGTH; i++)
+                {
+                    token = strtok(NULL, " .");
+                    remote_ip[i] = asciiToUint8(token);
+                }
+                uint8_t socketNum = createSocket(PROTOCOL_ICMP, sockets, MAX_SOCKETS, remote_ip, 0);
+                if(socketNum < MAX_SOCKETS)
+                {
+                    restartTimer(arpRequestTimeoutCallback);
+                    gf_arp_send_request = socketNum;
+                }
+                else
+                {
+                    putsUart0("No sockets available\n");
+                }
+            }
+            if (strcmp(token, "connect") == 0)
+            {
+                uint8_t remote_ip[4];
+                uint16_t remote_port;
+                for (i = 0; i < IP_ADD_LENGTH; i++)
+                {
+                    token = strtok(NULL, " .");
+                    remote_ip[i] = asciiToUint8(token);
+                }
+                token = strtok(NULL, " :");
+                remote_port = asciiToUint16(token);
+                
+                
+                uint8_t socketNum = createSocket(PROTOCOL_TCP, sockets, MAX_SOCKETS, remote_ip, remote_port);
+                if(socketNum < MAX_SOCKETS)
+                {
+                    setTcpState(&(sockets[socketNum]), TCP_SYN_SENT);
+                    restartTimer(arpRequestTimeoutCallback);
+                    gf_arp_send_request = socketNum;
+                }
+                else
+                {
+                    putsUart0("No sockets available\n");
+                }
+                    
+            }
+            if (strcmp(token, "disconnect") == 0)
+            {
+                token = strtok(NULL, " ");
+                uint8_t socketNumber = asciiToUint8(token);
+                if(socketNumber < MAX_SOCKETS && socketNumber != 0)
+                {
+                    gf_tcp_send_fin = socketNumber;
+                    setTcpState(&(sockets[socketNumber]), TCP_FIN_WAIT_1);
+                }
+                    
+                
+            }
+            if (strcmp(token, "subscribe") == 0)
+            {
+                mqttFlags = 0;
+                gf_mqtt_subscribe = 0;
+                nargs = 0;
+                token = strtok(NULL, " ");
+                while(token != NULL)
+                {
+                    if(token[0] == '-')
+                    {
+                        switch(token[1])
+                        {
+                            case 'h': // Socket Number
+                                token = strtok(NULL, " ");
+                                gf_mqtt_subscribe = asciiToUint8(token);
+                                break;
+                            case 't': // Topic name
+                                token = strtok(NULL, " ");
+                                removeDelimiters(token, mqttMessages[nargs++], "");
+                                gf_mqtt_rx_suback = addTopic(mqttMessages[nargs - 1], topics, MAX_TOPICS);
+                                if(gf_mqtt_rx_suback == 0)
+                                {
+                                    gf_mqtt_subscribe = 0;
+                                    return;
+                                }
+                                break;
+                            case 'q':   // QoS
+                                token = strtok(NULL, " ");
+                                mqttFlags = asciiToUint8(token);
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    token = strtok(NULL, " ");
+                }
+            }
+            if (strcmp(token, "unsubscribe") == 0)
+            {
+                mqttFlags = 0;
+                gf_mqtt_unsubscribe = 0;
+                nargs = 0;
+                token = strtok(NULL, " ");
+                while(token != NULL)
+                {
+                    if(token[0] == '-')
+                    {
+                        switch(token[1])
+                        {
+                            case 'h': // Socket Number
+                                token = strtok(NULL, " ");
+                                gf_mqtt_unsubscribe = asciiToUint8(token);
+                                break;
+                            case 't': // Topic name
+                                token = strtok(NULL, " ");
+                                removeDelimiters(token, mqttMessages[nargs++], "");
+                                gf_mqtt_rx_unsuback = getTopicIndex(token, topics, MAX_TOPICS);
+                                break;
+                            case 'q':   // QoS
+                                token = strtok(NULL, " ");
+                                mqttFlags = asciiToUint8(token);
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    token = strtok(NULL, " ");
+                }
+            }
+            if (strcmp(token, "ss") == 0)
+            {
+                uint8_t socketNumber, i;
+                char str[10];
+                uint8_t ip[4];
+                putsUart0("Socket Number\t\tNetid\t\tState\t\tLocal Address:Port\tPeer Address:Port\n");
+                for(socketNumber = 1; socketNumber < MAX_SOCKETS; socketNumber++)
+                {
+                    if(sockets[socketNumber].id == 0)
+                        continue;
+                    putcUart0('0' + socketNumber);
+                    putsUart0("\t");
+                    switch(sockets[socketNumber].id)
+                    {
+                        case PROTOCOL_ICMP:
+                            putsUart0("icmp\t\t");
+                            break;
+                        case PROTOCOL_UDP:
+                            putsUart0("udp\t\t");
+                            break;
+                        case PROTOCOL_TCP:
+                            putsUart0("tcp\t\t");
+                            switch(sockets[socketNumber].state)
+                            {
+                                case TCP_CLOSED:
+                                    putsUart0("CLOSED");
+                                    break;
+                                case TCP_LISTEN:
+                                    putsUart0("LISTEN");
+                                    break;
+                                case TCP_SYN_RECEIVED:
+                                    putsUart0("SYN_RECEIVED\t");
+                                    break;
+                                case TCP_SYN_SENT:
+                                    putsUart0("SYN_SENT");
+                                    break;
+                                case TCP_ESTABLISHED:
+                                    putsUart0("ESTABLISHED");
+                                    break;
+                                case TCP_FIN_WAIT_1:
+                                    putsUart0("FIN_WAIT_1");
+                                    break;
+                                case TCP_FIN_WAIT_2:
+                                    putsUart0("FIN_WAIT_2");
+                                    break;
+                                case TCP_CLOSING:
+                                    putsUart0("CLOSING");
+                                    break;
+                                case TCP_CLOSE_WAIT:
+                                    putsUart0("CLOSING_WAIT");
+                                    break;
+                                case TCP_LAST_ACK:
+                                    putsUart0("LAST_ACK");
+                                    break;
+                                case TCP_TIME_WAIT:
+                                    putsUart0("WAITING");
+                                    break;
+                                default:
+                                    break;
+                            }
+                            break;
+                        default:
+                            continue;
+                            break;
+                    }
+                    putsUart0("\t");
+                    getIpAddress(ip);
+                    for (i = 0; i < IP_ADD_LENGTH; i++)
+                    {
+                        snprintf(str, sizeof(str), "%"PRIu8, ip[i]);
+                        putsUart0(str);
+                        if (i < IP_ADD_LENGTH-1)
+                            putcUart0('.');
+                    }
+                    snprintf(str, sizeof(str), ":%"PRIu16"\t\t", sockets[socketNumber].localPort);
+                    putsUart0(str);
+                    for (i = 0; i < IP_ADD_LENGTH; i++)
+                    {
+                        snprintf(str, sizeof(str), "%"PRIu8, sockets[socketNumber].remoteIpAddress[i]);
+                        putsUart0(str);
+                        if (i < IP_ADD_LENGTH-1)
+                            putcUart0('.');
+                    }
+                    snprintf(str, sizeof(str), ":%"PRIu16, sockets[socketNumber].remotePort);
+                    putsUart0(str);
+                    putcUart0('\n');
+                }
+            }
+            if (strcmp(token, "mqttConnect") == 0)
+            {
+                gf_mqtt_connect_default = 0;
+                nargs = 0;
+                mqttFlags = 0;
+                token = strtok(NULL, " ");
+                removeDelimiters(token, mqttMessages[nargs++], "");
+                token = strtok(NULL, " ");
+                while(token != NULL)
+                {
+                    if(token[0] == '-')
+                    {
+                        switch(token[1])
+                        {
+                            case 'h':
+                                token = strtok(NULL, " ");
+                                gf_mqtt_connect_default = asciiToUint8(token);
+                                if(sockets[gf_mqtt_connect_default].state != TCP_ESTABLISHED)
+                                    gf_mqtt_connect_default = 0;
+                                break;
+                            case 'w':
+                                mqttFlags |= MQTT_WILL;
+                                token = strtok(NULL, " ");
+                                removeDelimiters(token, mqttMessages[nargs++], "");
+                                break;
+                            case 'u':
+                                mqttFlags |= MQTT_USERNAME;
+                                //token = strtok(NULL, " ");
+                                token = IO_USRNAME;
+                                removeDelimiters(token, mqttMessages[nargs++], "");                            
+                                break;
+                            case 'p':
+                                mqttFlags |= MQTT_PASSWORD;
+                                //token = strtok(NULL, " ");
+                                token = IO_KEY;
+                                removeDelimiters(token, mqttMessages[nargs++], "");
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    token = strtok(NULL, " ");
+                }
+                if(gf_mqtt_connect_default != 0)
+                    return;
+                uint8_t ip_address[4];
+
+                if(!checkEmptyBrokerAddress && !checkRemoteBrokerAddress())
+                    getIpMqttBrokerAddress(ip_address);
+                else if(checkRemoteBrokerAddress())
+                    getIpGatewayAddress(ip_address);
+                else
+                    getIpMqttBrokerAddress(ip_address);
+
+                //getIpMqttBrokerAddress(mqtt_address);
+                uint8_t socketNum = createSocket(PROTOCOL_TCP, sockets, MAX_SOCKETS, ip_address, MQTT_PORT);
+                if(socketNum < MAX_SOCKETS)
+                {
+                    setTcpState(&(sockets[socketNum]), TCP_SYN_SENT);
+                    restartTimer(arpRequestTimeoutCallback);
+                    gf_arp_send_request = socketNum;
+                    gf_mqtt_connect = socketNum;
+                }
+                else
+                {
+                    putsUart0("No sockets available\n");
+                }
+            }
+            if (strcmp(token, "publish") == 0)
+            {
+                nargs = 0;
+                mqttFlags = 0;
+                gf_mqtt_publish = 0;
+                token = strtok(NULL, " ");
+                while(token != NULL)
+                {
+                    if(token[0] == '-')
+                    {
+                        switch(token[1])
+                        {
+                            case 'h': // Socket Number
+                                token = strtok(NULL, " ");
+                                gf_mqtt_publish = asciiToUint8(token);
+                                break;
+                            case 't': // Topic name
+                                token = strtok(NULL, " ");
+                                removeDelimiters(token, mqttMessages[nargs++], "");
+                                break;
+                            case 'm':   // Message
+                                token = strtok(NULL, " ");
+                                removeDelimiters(token, mqttMessages[nargs++], "");
+                                break;
+                            case 'q':   // QoS
+                                token = strtok(NULL, " ");
+                                mqttFlags = asciiToUint8(token);
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    token = strtok(NULL, " ");
+                }
+            }
+            if (strcmp(token, "publishUptime") == 0)
+            {
+                char str[32];
+                sprintf(str, "%u""ms", getUptime());
+                nargs = 0;
+                mqttFlags = 0;
+                gf_mqtt_publish = 0;
+                token = strtok(NULL, " ");
+                while(token != NULL)
+                {
+                    if(token[0] == '-')
+                    {
+                        switch(token[1])
+                        {
+                            case 'h': // Socket Number
+                                token = strtok(NULL, " ");
+                                gf_mqtt_publish = asciiToUint8(token);
+                                break;
+                            case 'q':   // QoS
+                                token = strtok(NULL, " ");
+                                mqttFlags = asciiToUint8(token);
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    token = strtok(NULL, " ");
+                }
+                strcpy(mqttMessages[0], "Time");
+                strcpy(mqttMessages[1], str);
+                nargs = 2;
+                
+            }
+            if (strcmp(token, "mqttDisconnect") == 0)
+            {
+                mqttFlags = 0;
+                gf_mqtt_subscribe = 0;
+                nargs = 0;
+                token = strtok(NULL, " ");
+                while(token != NULL)
+                {
+                    if(token[0] == '-')
+                    {
+                        switch(token[1])
+                        {
+                            case 'h': // Socket Number
+                                token = strtok(NULL, " ");
+                                gf_mqtt_disconnect = asciiToUint8(token);
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                    token = strtok(NULL, " ");
+                }
+            }
+            if (strcmp(token, "showTopics") == 0)
+            {
+                uint8_t i;
+                putsUart0("Subbed Topics:\n");
+                for(i = 1; i < MAX_TOPICS; i++)
+                {
+                    if(topics[i].name[0] != '\0')
+                    {
+                        putsUart0(topics[i].name);
+                        putcUart0('\n');
+                    }
+                }
             }
         }
     }
 }
 
-void arpTimeout()
+void processTransmission()
 {
-    arpReqFlag = 1;
-    restartTimer(arpTimeout);
-}
-
-void checkPending(etherHeader *ether, socket *s)
-{
-    if(arpReqFlag)
+    uint8_t buffer[MAX_PACKET_SIZE];
+    etherHeader *data = (etherHeader*) buffer;
+    uint8_t local_ip[4];
+    
+    if (gf_send_ping)
     {
-        uint8_t i;
-        uint8_t localip[4];
-        getIpAddress(localip);
-//        uint8_t mqtt_ip[4];
-//        uint8_t ip2[] = {0, 0, 0, 0};
-//        getIpMqttBrokerAddress(mqtt_ip);
-//
-//        if(memcmp(mqtt_ip, ip2, sizeof(mqtt_ip)) != 0)
-//        {
-//            for(i = 0; i < IP_ADD_LENGTH; i++)
-//            {
-//                 s->remoteIpAddress[i] = mqtt_ip[i];
-//            }
-//        }
-        checkEmptyBrokerAddress(s);
-
-        sendArpRequest(ether, localip, s->remoteIpAddress);
-        arpReqFlag = 0;
-
-//        if(!arpTimer)
-//        {
-//            startOneshotTimer(arpTimeout, 3);
-//            arpTimer++;
-//        }
-//        else
-//            restartTimer(arpTimeout);
+        pingTime = getUptime();
+        sendPing(data, sockets[gf_send_ping]);
+        gf_rx_ping = gf_send_ping;
+        gf_send_ping = 0;
     }
-
-    if(arpResFlag)
+    if (gf_arp_send_request)
     {
-        sendArpResponse(ether);
-        arpResFlag = 0;
+        getIpAddress(local_ip);
+        sendArpRequest(data, local_ip, sockets[gf_arp_send_request].remoteIpAddress);
+        gf_rx_arp = gf_arp_send_request;
+        gf_arp_send_request = 0;
     }
-
-    if(tcpSynFlag)
+    if (gf_tcp_send_syn)
     {
-        sendTcpMessage(ether, s, SYN, NULL, 0);
-        tcpSynFlag = 0;
-        s->sequenceNumber++;
+        sendTcpMessage(data, sockets[gf_tcp_send_syn], SYN, NULL, 0);
+        restartTimer(tcpHandshakeTimeoutCallback);
+        gf_tcp_rx_synack = gf_tcp_send_syn;
+        gf_tcp_send_syn = 0;
     }
-
-    if(tcpAckFlag)
+    if (gf_tcp_send_ack)
     {
-        sendTcpMessage(ether, s, ACK, NULL, 0);
-        tcpAckFlag = 0;
+        sendTcpMessage(data, sockets[gf_tcp_send_ack], ACK, NULL, 0);
+        gf_tcp_send_ack = 0;
     }
-
-    if(tcpAckFinFlag)
+    if (gf_mqtt_subscribe)
     {
-        sendTcpMessage(ether, s, (ACK | FIN), NULL, 0);
-        tcpAckFinFlag = 0;
-    }
-
-    if(tcpFinFlag)
-    {
-        sendTcpMessage(ether, s, FIN, NULL, 0);
-        tcpFinFlag = 0;
-    }
-    if(mqttConnFlag)
-    {
-        //mqttState = MQTT_CONNECT_SENT;
-        sendMqttConnect(ether, s, CLEAN_SESH, "raquel");
-        mqttConnFlag = 0;
-    }
-
-    if(mqttPubFlag)
-    {
-        mqttState = MQTT_PUBLISH;
-        sendMqttPublish(ether, s, topicName, topicData);
-        mqttPubFlag = 0;
-    }
-
-    if(mqttSubFlag)
-    {
-        mqttState = MQTT_SUBSCRIBE;
-        sendMqttSubscribe(ether, s, topicName);
-        mqttSubFlag = 0;
-    }
-
-    if(mqttUnsubFlag)
-    {
-        mqttState = MQTT_UNSUBSCRIBE;
-        sendMqttUnsub(ether, s, topicName);
-        mqttUnsubFlag = 0;
-    }
-
-    if(mqttDisconnFlag)
-    {
-        mqttState = MQTT_DISCONNECT;
-        sendMqttDisconnect(ether, s);
-        mqttDisconnFlag = 0;
-    }
-}
-
-void checkEmptyBrokerAddress(socket *s)
-{
-    uint8_t ip[4];
-    int i, check = 0;
-
-    getIpMqttBrokerAddress(ip);
-
-    for(i = 0; i < IP_ADD_LENGTH; i++)
-    {
-        if(ip[i] == 0)
-            check++;
-    }
-
-    if(check != 4)
-    {
-        checkRemoteBrokerAddress(s);
-
-//        for(i = 0; i < IP_ADD_LENGTH; i++)
-//        {
-//             s->remoteIpAddress[i] = ip[i];
-//        }
-//        arpReqFlag = 1;
-//        connectCommand = true;
-    }
-}
-
-void checkRemoteBrokerAddress(socket *s)
-{
-    uint8_t mqttip[4];
-    uint8_t localip[4];
-    uint8_t gwip[4];
-    int i, check = 0;
-
-    getIpAddress(localip);
-    getIpMqttBrokerAddress(mqttip);
-    getIpGatewayAddress(gwip);
-
-    for(i = 0; i < IP_ADD_LENGTH - 1; i++)
-    {
-        if(localip[i] == mqttip[i])
-            check++;
-    }
-
-    if(check == 3)
-    {
-        for(i = 0; i < IP_ADD_LENGTH; i++)
+        if(sockets[gf_mqtt_subscribe].state == TCP_ESTABLISHED)
         {
-             s->remoteIpAddress[i] = mqttip[i];
+            // mqttSubscribe(data, sockets[gf_mqtt_subscribe], mqttFlags, &(mqttMessages[0]), nargs);
+            sendMqttMessage(data, sockets[gf_mqtt_subscribe], SUBSCRIBE, mqttFlags, (void *)mqttMessages, MAX_CHARS, nargs);
         }
-        arpReqFlag = 1;
-        connectCommand = true;
+        gf_mqtt_subscribe = 0;
     }
+    if (gf_mqtt_subscribe_default)
+    {
+        static uint8_t j = 1;
+        if(sockets[gf_mqtt_subscribe_default].state == TCP_ESTABLISHED)
+        {   
+            while(j < MQTT_DEFAULT_N_TOPICS + 1)
+            {
+                if(topics[j].name[0] == '\0')
+                    j++;
+                else
+                    break;
+            }
+            if(j >= MQTT_DEFAULT_N_TOPICS + 1)
+            {
+                j = 1;
+                gf_mqtt_subscribe_default = 0;
+                return;
+            }
+
+            sendMqttMessage(data, sockets[gf_mqtt_subscribe_default], SUBSCRIBE, mqttFlags, (void *)(topics[j++].name), MAX_CHARS, 1);
+            gf_mqtt_rx_suback_default = gf_mqtt_subscribe_default;
+            gf_mqtt_subscribe_default = 0;
+        }
+    }
+    if (gf_mqtt_unsubscribe)
+    {
+        if(sockets[gf_mqtt_unsubscribe].state == TCP_ESTABLISHED)
+        {
+            sendMqttMessage(data, sockets[gf_mqtt_unsubscribe], UNSUBSCRIBE, mqttFlags, (void *)mqttMessages, MAX_CHARS, nargs);
+        }
+        gf_mqtt_unsubscribe = 0;
+    }
+    if (gf_mqtt_publish)
+    {
+        if(sockets[gf_mqtt_publish].state == TCP_ESTABLISHED)
+        {
+            // mqttPublish(data, sockets[gf_mqtt_publish], mqttFlags, &(mqttMessages[0]), nargs);
+            sendMqttMessage(data, sockets[gf_mqtt_publish], PUBLISH, mqttFlags, (void *)mqttMessages, MAX_CHARS, nargs);
+        }
+        gf_mqtt_publish = 0;
+    }
+    if (gf_tcp_send_fin)
+    {
+        sendTcpMessage(data, sockets[gf_tcp_send_fin], FIN, NULL, 0);
+        gf_tcp_send_fin = 0;
+    }
+    if (gf_tcp_send_finack)
+    {
+        sendTcpMessage(data, sockets[gf_tcp_send_finack], (FIN | ACK), NULL, 0);
+        gf_rx_lastAck = gf_tcp_send_finack;
+        gf_tcp_send_finack = 0;
+    }
+    if (gf_disconnect)
+    {
+        if (sockets[gf_disconnect].state == TCP_CLOSE_WAIT)
+        {
+            sendTcpMessage(data, sockets[gf_disconnect], FIN, NULL, 0);
+            gf_rx_lastAck = gf_disconnect;
+        }
+        if (sockets[gf_disconnect].state == TCP_FIN_WAIT_2)
+        {
+            sendTcpMessage(data, sockets[gf_disconnect], ACK, NULL, 0);
+        }
+        putsUart0("Socket closed\n");
+        deleteSocket(&(sockets[gf_disconnect]));
+        gf_disconnect = 0;
+    }
+    if (gf_mqtt_disconnect)
+    {
+        if(sockets[gf_mqtt_disconnect].state == TCP_ESTABLISHED)
+        {
+            sendMqttMessage(data, sockets[gf_mqtt_disconnect], DISCONNECT, mqttFlags, (void *)mqttMessages, MAX_CHARS, nargs);
+        }
+        gf_mqtt_disconnect = 0;
+    }
+    if (gf_mqtt_connect)
+    {
+        if(sockets[gf_mqtt_connect].state == TCP_ESTABLISHED)
+        {
+            putsUart0("Sending mqtt connect\n");
+            // mqttConnect(data, sockets[gf_mqtt_connect], mqttFlags, &(mqttMessages[0]), nargs);
+            sendMqttMessage(data, sockets[gf_mqtt_connect], CONNECT, mqttFlags, (void *)mqttMessages, MAX_CHARS, nargs);
+            gf_mqtt_rx_connack = gf_mqtt_connect;
+            gf_mqtt_connect = 0;
+        }
+    }
+    if (gf_mqtt_connect_default)
+    {
+        if(sockets[gf_mqtt_connect_default].state == TCP_ESTABLISHED)
+        {
+            putsUart0("Sending mqtt connect\n");
+            if(checkRemoteBrokerAddress())
+            {
+                mqttFlags = 192;
+                //mqttMessages[0] = "-h";
+                strncpy(mqttMessages[0], "-h", 2);
+                //mqttMessages[1] = IO_USRNAME;
+                //mqttMessages[2] = IO_KEY;
+                strncpy(mqttMessages[1], IO_USRNAME, strlen(IO_USRNAME));
+                strncpy(mqttMessages[2], IO_KEY, strlen(IO_KEY));
+
+                sendMqttMessage(data, sockets[gf_mqtt_connect_default], CONNECT, mqttFlags, (void *)mqttMessages, MAX_CHARS, 3);
+            }
+            else
+            // mqttConnect(data, sockets[gf_mqtt_connect], mqttFlags, &(mqttMessages[0]), nargs);
+                sendMqttMessage(data, sockets[gf_mqtt_connect_default], CONNECT, mqttFlags, (void *)MQTT_DEFAULT_CONFIG, MAX_CHARS, MQTT_DEFAULT_CONFIG_NARGS);
+            gf_mqtt_rx_connack = gf_mqtt_connect_default;
+            gf_mqtt_connect_default = 0;
+        }
+    }
+}
+
+connectMqttBroker()
+{
+    uint8_t ip_address[4];
+
+    if(!checkEmptyBrokerAddress() && !checkRemoteBrokerAddress())
+        getIpMqttBrokerAddress(ip_address);
+    else if(checkRemoteBrokerAddress())
+        getIpGatewayAddress(ip_address);
     else
-    {
-        //send arp request to gateway ip first to get
-        //gateway MAC, then use mqtt ip and gateway MAC
-        for(i = 0; i < IP_ADD_LENGTH; i++)
-        {
-             s->remoteIpAddress[i] = gwip[i];
-        }
-        arpReqFlag = 1;
-        connectCommand = true;
-    }
+        getIpMqttBrokerAddress(ip_address);
+
+    //getIpMqttBrokerAddress(mqtt_address);
+    uint8_t socketNum = createSocket(PROTOCOL_TCP, sockets, MAX_SOCKETS, ip_address, MQTT_PORT);
+    setTcpState(&(sockets[socketNum]), TCP_SYN_SENT);
+    restartTimer(arpRequestTimeoutCallback);
+    gf_arp_send_request = socketNum;
+    gf_mqtt_connect_default = socketNum;
 }
 //-----------------------------------------------------------------------------
 // Main
 //-----------------------------------------------------------------------------
 
-// Max packet is calculated as:
-// Ether frame header (18) + Max MTU (1500) + CRC (4)
-#define MAX_PACKET_SIZE 1522
-
 int main(void)
 {
-    uint8_t* udpData;
+    char str[32];
+    uint8_t *udpData;
+    uint8_t *tcpData; 
+    uint8_t *mqttMessage;
+    uint16_t topicLength;
+    uint8_t *mqttData;
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader*) buffer;
     socket s;
-
-    tcpState = TCP_CLOSED;
-    mqttState = MQTT_DISCONNECT;
 
     // Init controller
     initHw();
@@ -638,6 +1209,8 @@ int main(void)
     // Init timer
     initTimer();
 
+    initDefaultTimers();
+
     // Init ethernet interface (eth0)
     // Use the value x from the spreadsheet
     putsUart0("\nStarting eth0\n");
@@ -647,35 +1220,27 @@ int main(void)
     // Init EEPROM
     initEeprom();
     readConfiguration();
+
     setPinValue(GREEN_LED, 1);
     waitMicrosecond(100000);
     setPinValue(GREEN_LED, 0);
     waitMicrosecond(100000);
+    uint8_t local_ip[4];
+    uint8_t local_mac[6];
+    getIpAddress(local_ip);
+    getEtherMacAddress(local_mac);
+
+    connectMqttBroker();
 
     // Main Loop
     // RTOS and interrupts would greatly improve this code,
     // but the goal here is simplicity
-
-    s.localPort = 65532;
-    s.remotePort = 1883;
-
-//    s.remoteIpAddress[0] = 192;
-//    s.remoteIpAddress[1] = 168;
-//    s.remoteIpAddress[2] = 1;
-//    s.remoteIpAddress[3] = 1;
-
-    checkEmptyBrokerAddress(&s);
-    //checkRemoteBrokerAddress(&s);
-
-    s.sequenceNumber = random32();
-
     while (true)
     {
-
         // Put terminal processing here
         processShell();
 
-        checkPending(data, &s);
+        processTransmission();
 
         // Packet processing
         if (isEtherDataAvailable())
@@ -690,37 +1255,52 @@ int main(void)
             // Get packet
             getEtherPacket(data, MAX_PACKET_SIZE);
 
-
-
             // Handle ARP request
             if (isArpRequest(data))
             {
                 sendArpResponse(data);
             }
-
+            
+            // Handle ARP response
             if(isArpResponse(data))
             {
-                stopTimer(arpTimeout);
-                processArpResponse(data, &s);
-
-                if(connectCommand)
-                //if(!check)
+                if(gf_rx_arp)
                 {
-                    tcpSynFlag = 1;
-                    //check++;
-                    //tcpState = TCP_SYN_SENT;
-                    connectCommand = false;
+                    setSocketHwAddress(data, &(sockets[gf_rx_arp]));
+                    switch(sockets[gf_rx_arp].id)
+                    {
+                        case PROTOCOL_TCP:
+                            gf_tcp_send_syn = gf_rx_arp;
+                            restartTimer(tcpHandshakeTimeoutCallback);
+                            break;
+                        case PROTOCOL_ICMP:
+                            gf_send_ping = gf_rx_arp;
+                            break;
+                    }
+                    gf_rx_arp = 0;
                 }
             }
             // Handle IP datagram
             if (isIp(data))
             {
-                if (isIpUnicast(data))
-                {
+            	if (isIpUnicast(data))
+            	{
                     // Handle ICMP ping request
                     if (isPingRequest(data))
                     {
                         sendPingResponse(data);
+                        putsUart0("Pinged\n");
+                    }
+
+                    // Handle ICMP ping response
+                    if(isPingResponse(data))
+                    {
+                        putsUart0("Time = ");
+                        sprintf(str, "%u""ms", getUptime() - pingTime);
+                        putsUart0(str);
+                        putcUart0('\n');
+                        deleteSocket(&(sockets[gf_rx_ping]));
+                        gf_rx_ping = 0;
                     }
 
                     // Handle UDP datagram
@@ -738,10 +1318,192 @@ int main(void)
                     // Handle TCP datagram
                     if (isTcp(data))
                     {
-                        processTcp(data, &s);
+                        uint8_t socketNumber = isTcpSocketConnected(data, sockets, MAX_SOCKETS);
+                        socket *s = &(sockets[socketNumber]);
+                        // Invalid socket
+                        if(socketNumber >= MAX_SOCKETS)
+                            continue;
+                        
+                        tcpData = getTcpData(data, s);
+                        uint16_t tcpFlags = getTcpFlags(data);
+                        switch(s->state)
+                        {
+                            case TCP_SYN_SENT:
+                                switch(tcpFlags)
+                                {
+                                    case (SYN | ACK):
+                                        gf_tcp_send_ack = socketNumber;
+                                        gf_tcp_rx_synack = 0;
+                                        setTcpState(s, TCP_ESTABLISHED);
+                                        break;
+                                    case (RST | ACK):
+                                        deleteSocket(&(sockets[gf_tcp_rx_synack]));
+                                        putsUart0("TCP Connection refused\nPort not open\n");
+                                        gf_tcp_rx_synack = 0;
+                                        break;
+                                    default:
+                                        break;
+                                }
+                                break;
+                            case TCP_ESTABLISHED:
+                                switch(tcpFlags)
+                                {
+                                    case (PSH | ACK):
+                                        gf_tcp_send_ack = socketNumber;
+                                        if(isMqtt(data))
+                                        {
+                                            uint8_t mqttFlags = getMqttFlags(tcpData);
+                                            mqttData = getMqttData(tcpData);
+                                            switch(mqttFlags)
+                                            {
+                                                case CONNACK:
+                                                    if(gf_mqtt_rx_connack)
+                                                    {
+                                                        if(mqttData[1] == 0)
+                                                        {
+                                                            putsUart0("Connected\n");
+                                                            //gf_mqtt_subscribe_default = gf_mqtt_rx_connack;
+                                                        }
+                                                        else
+                                                        {
+                                                            putsUart0("MQTT connection refused\nReturned: ");
+                                                            putcUart0(mqttData[1] + '0');
+                                                            putsUart0("\n");
+                                                            deleteSocket(&(sockets[gf_mqtt_rx_connack]));
+                                                        }
+                                                        gf_mqtt_rx_connack = 0;
+                                                    }
+                                                    break;
+                                                case SUBACK:
+                                                    if(gf_mqtt_rx_suback)
+                                                    {
+                                                        putsUart0("Subscribed to ");
+                                                        putsUart0(topics[gf_mqtt_rx_suback].name);
+                                                        putcUart0('\n');
+                                                        gf_mqtt_rx_suback = 0;
+                                                    }
+                                                    else if(gf_mqtt_rx_suback_default)
+                                                    {
+                                                        putsUart0("Subscribed to default topics\n");
+                                                        gf_mqtt_subscribe_default = gf_mqtt_rx_suback_default;
+                                                        gf_mqtt_rx_suback_default = 0;
+                                                    }
+                                                    break;
+                                                case UNSUBACK:
+                                                    if(gf_mqtt_rx_unsuback)
+                                                    {
+                                                        putsUart0("Unsubscribed from ");
+                                                        putsUart0(topics[gf_mqtt_rx_unsuback].name);
+                                                        putcUart0('\n');
+                                                        removeTopic(gf_mqtt_rx_unsuback, topics);
+                                                        gf_mqtt_rx_unsuback = 0;
+                                                    }
+                                                    break;
+                                                case PUBLISH:
+                                                    topicLength = (mqttData[0] << 8) + mqttData[1];
+                                                    uint16_t msgLength = getMqttMessageLength(tcpData);
+                                                    mqttMessage = getMqttMessage(tcpData);
+                                                    if (strncmp((char *)mqttData+2, "Lights", topicLength) == 0)
+                                                    {
+                                                        if (strncmp((char *)mqttMessage, "on", msgLength) == 0)
+                                                        {
+                                                            setPinValue(GREEN_LED, 1);
+                                                            setPinValue(RED_LED, 1);
+                                                            setPinValue(BLUE_LED, 1);
+                                                        }
+                                                        else if (strncmp((char *)mqttMessage, "green", msgLength) == 0)
+                                                            togglePinValue(GREEN_LED);
+                                                        else if (strncmp((char *)mqttMessage, "red", msgLength) == 0)
+                                                            togglePinValue(RED_LED);
+                                                        else if (strncmp((char *)mqttMessage, "blue", msgLength) == 0)
+                                                            togglePinValue(BLUE_LED);
+                                                        else if (strncmp((char *)mqttMessage, "off", msgLength) == 0)
+                                                        {
+                                                            setPinValue(GREEN_LED, 0);
+                                                            setPinValue(RED_LED, 0);
+                                                            setPinValue(BLUE_LED, 0);
+                                                        }
+                                                            
+                                                    }
+                                                    else if (strncmp((char *)mqttData+2, "Time", topicLength) == 0)
+                                                    {
+                                                        putsUart0("Uptime: ");
+                                                        putnsUart0((char *)mqttMessage, msgLength);
+                                                        putsUart0("\n");
+                                                    }
+                                                    else
+                                                    {
+                                                        putsUart0("From Topic: ");
+                                                        putnsUart0((char *) &(mqttData[2]), topicLength);
+                                                        putsUart0("\nMessage: ");
+                                                        putnsUart0((char *)mqttMessage, msgLength);
+                                                        putsUart0("\n");
+                                                    }
+                                                    break;  
+                                                }
+                                        }
+                                        break;
+                                    case (FIN | ACK):
+                                        gf_tcp_send_ack = 0;
+                                        gf_tcp_send_finack = socketNumber;
+                                        gf_close_socket = socketNumber;
+                                        setTcpState(s, TCP_CLOSE_WAIT);
+                                        // restartTimer(closeSocketCallback);       
+                                        break;
+                                    case (RST | ACK):
+                                        resetSocket(s);
+                                        setTcpState(s, TCP_SYN_SENT);
+                                        putsUart0("Reset received\n");
+                                        gf_tcp_send_syn = socketNumber;
+                                        if(isMqttSocket(s))
+                                            gf_mqtt_connect_default = socketNumber;
+                                        break;
+                                    case ACK:
+                                        break;
+                                    default:
+                                        gf_tcp_send_ack = socketNumber;
+                                        break;
+                                }
+                                break;
+                            case TCP_FIN_WAIT_1:
+                                switch(tcpFlags)
+                                {
+                                    case ACK:
+                                        setTcpState(s, TCP_FIN_WAIT_2);
+                                        break;
+                                    default:
+                                }
+                            case TCP_FIN_WAIT_2:
+                                switch(tcpFlags)
+                                {
+                                    case FIN:
+                                        setTcpState(s, TCP_TIME_WAIT);
+                                        restartTimer(closeSocketCallback);
+                                        gf_close_socket = socketNumber;
+                                        break;
+                                    default:
+                                }
+                            case TCP_CLOSE_WAIT:
+                                switch(tcpFlags)
+                                {
+                                    case ACK:
+                                        if(gf_rx_lastAck)
+                                        {
+                                            deleteSocket(&(sockets[gf_rx_lastAck]));
+                                            putsUart0("Socket closed");
+                                            gf_rx_lastAck = 0;
+                                        }
+                                        break;
+                                    default:
+                                }
+                            
+                            default:
+                                    
+                        }
                     }
                 }
             }
         }
     }
 }
+

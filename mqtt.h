@@ -23,102 +23,61 @@
 #include <stdbool.h>
 #include "tcp.h"
 
+
+#define MQTT_PORT   1883
+
+#define CONNECT     0x10
+#define CONNACK     0x20
+#define PUBLISH     0x30
+#define PUBACK      0x40
+#define PUBREC      0x50
+#define PUBREL      0x60
+#define PUBCOMP     0x70
+#define SUBSCRIBE   0x80
+#define SUBACK      0x90
+#define UNSUBSCRIBE 0xA0
+#define UNSUBACK    0xB0
+#define PINGREQ     0xC0
+#define PINGRESP    0xD0
+#define DISCONNECT  0xE0
+
+#define MQTT_CONNECT_HEADER_LENGTH  12
+#define MQTT_USERNAME               128
+#define MQTT_PASSWORD               64
+#define MQTT_WILL_RETAIN            32
+#define MQTT_WILL                   4
+#define MQTT_CLEAN                  2
+#define MQTT_MAX_ARGUMENTS          5
+#define MQTT_MAX_ARGUMENT_LENGTH    80
+
+
+typedef struct _topic
+{
+    char name[MQTT_MAX_ARGUMENT_LENGTH];
+} topic;
+
 //-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------
 
-#define QOS0    0
-#define QOS1    2
-#define QOS2    4
+void mqttConnect(etherHeader *ether, socket s, uint8_t flags, char *data[], uint8_t nargs);
+void mqttSubscribe(etherHeader *ether, socket s, uint8_t QoS, char *data[], uint8_t nargs);
+void mqttPublish(etherHeader *ether, socket s, uint8_t QoS, char *data[], uint8_t nargs);
+void mqttDisconnect(etherHeader *ether, socket s, uint8_t QoS, char *data[], uint8_t nargs);
+void sendMqttMessage(etherHeader *ether, socket s, uint8_t controlHeader, uint8_t messageFlags, void *data, uint8_t MAX_ARGUMENT_LENGTH, uint8_t nargs);
+uint16_t getArgumentLength(char *str);
 
-#define MQTT_PROTOCOL 0x04
-#define KEEP_ALIVE_SHORT 60
-#define KEEP_ALIVE_LONG 6000
+bool isMqtt(etherHeader *ether);
 
-#define MQTT_PACKET_IDENT 0x1234
+uint8_t getMqttFlags(uint8_t *data);
 
-//MQTT States
-#define MQTT_CONNECT_SENT 11
-#define MQTT_CONNECTED    12
-#define MQTT_PUBLISH      13
-#define MQTT_SUBSCRIBE    14
-#define MQTT_DISCONNECT   15
-#define MQTT_UNSUBSCRIBE  16
+uint8_t *getMqttData(uint8_t *data);
 
-//MQTT Flags
-#define WILL 0x04
-#define CLEAN_SESH 0x02
-#define WILL_QOS 0x18
-#define WILL_RET 0x20
-#define PSWD 0x40
-#define USRNAME 0x80
-
-uint8_t mqttState;
-
-uint8_t mqttConnFlag;
-uint8_t mqttPubFlag;
-uint8_t mqttSubFlag;
-uint8_t mqttUnsubFlag;
-uint8_t mqttDisconnFlag;
-
-typedef struct _mqttHeader
-{
-  uint8_t controlHeader;
-  uint8_t remainingLength;
-  uint8_t  data[0];         //mqtt variable header (all types)
-} mqttHeader;
-
-typedef struct _mqttConnectHeader
-{
-    uint16_t protocolLength;
-//    uint8_t msb;
-//    uint8_t lsb;
-    uint8_t protocolName[4];
-    uint8_t protocolLevel;
-    uint8_t controlFlags;
-    uint16_t keepAliveTime;
-    uint8_t data[0];        //payload
-
-} mqttConnectHeader;
-
-typedef struct _mqttConnectPayload
-{
-    uint16_t msb_lsb;
-//    uint8_t msb;
-//    uint8_t lsb;
-    uint8_t data[0];
-} mqttConnectPayload;
-
-typedef struct _mqttConnackHeader
-{
-    uint8_t connackFlags;
-    uint8_t returnCode;
-} mqttConnackHeader;
-
-typedef struct _mqttPublishHeader
-{
-    uint16_t header_msb_lsb;
-    uint8_t topic[0];
-    //uint16_t packetID;
-    uint8_t data[0];    //payload for data
-} mqttPublishHeader;
-
-typedef struct _mqttPublishPayload
-{
-    uint16_t msb_lsb;
-    uint8_t data[0];
-} mqttPublishPayload;
-
-uint8_t encodeLength(uint8_t X);
-void mqttGetState(char **mqtt_str);
-
-bool isPub(etherHeader* ether);
-void processMqtt(etherHeader* ether, socket* s);
-
-void sendMqttConnect(etherHeader *ether, socket *s, uint8_t flags, char* clientID);
-void sendMqttSubscribe(etherHeader *ether, socket *s, char* topicName);
-void sendMqttUnsub(etherHeader *ether, socket *s, char* topicName);
-void sendMqttPublish(etherHeader *ether, socket *s, char* topicName, char* topicData);
-void sendMqttDisconnect(etherHeader *ether, socket *s);
+uint8_t addTopic(char *name, topic *topics, uint8_t topicCount);
+void removeTopic(uint8_t topicIndex, topic *topics);
+uint8_t getTopicIndex(char *name, topic *topics, uint8_t topicCount);
+void *getMqttMessage(uint8_t *data);
+uint16_t getMqttMessageLength(uint8_t *data);
 
 #endif
+

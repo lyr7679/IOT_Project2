@@ -22,6 +22,7 @@
 #include "tm4c123gh6pm.h"
 #include "timer.h"
 
+#define GET_UPTIME_MS(t) ((t / 40000))
 //-----------------------------------------------------------------------------
 // Global variables
 //-----------------------------------------------------------------------------
@@ -43,7 +44,15 @@ void initTimer()
 
     // Enable clocks
     SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R4;
+    SYSCTL_RCGCWTIMER_R |= SYSCTL_RCGCWTIMER_R0;
     _delay_cycles(3);
+
+    // Configure WTimer 0 for 64-bit timer
+    WTIMER0_CTL_R &= ~TIMER_CTL_TAEN;                               // turn-off timer before reconfiguring
+    WTIMER0_CFG_R = TIMER_CFG_32_BIT_TIMER;                         // configure as 32-bit timer (A+B)
+    WTIMER0_TAMR_R = TIMER_TAMR_TAMR_PERIOD | TIMER_TAMR_TACDIR;    // configure for periodic mode (count down)
+    WTIMER0_CTL_R |= TIMER_CTL_TAEN;                                // turn-on timer
+
     // Configure Timer 4 for 1 sec tick
     TIMER4_CTL_R &= ~TIMER_CTL_TAEN;                 // turn-off timer before reconfiguring
     TIMER4_CFG_R = TIMER_CFG_32_BIT_TIMER;           // configure as 32-bit timer (A+B)
@@ -61,6 +70,12 @@ void initTimer()
         reload[i] = false;
     }
 }
+
+uint32_t getUptime(void)
+{
+    return GET_UPTIME_MS(WTIMER0_TAV_R);
+}
+
 
 bool startOneshotTimer(_callback callback, uint32_t seconds)
 {

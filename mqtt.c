@@ -18,25 +18,12 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include "mqtt.h"
 #include "timer.h"
-#include "uart0.h"
 
 // ------------------------------------------------------------------------------
 //  Globals
 // ------------------------------------------------------------------------------
-
-#define CONTROL_CONNECT     0x10
-#define CONTROL_PUBLISH     0x30
-#define CONTROL_SUBSCRIBE   0x82
-#define CONTROL_UNSUB       0xA2
-#define CONTROL_DISCONNECT  0xE0
-
-#define MAX_TOPICS         20
-
-char topic_name_arr[MAX_TOPICS][80] = {};
-int topic_name_id[MAX_TOPICS];
 
 // ------------------------------------------------------------------------------
 //  Structures
@@ -46,323 +33,637 @@ int topic_name_id[MAX_TOPICS];
 // Subroutines
 //-----------------------------------------------------------------------------
 
-uint8_t encodeLength(uint8_t X)
+void mqttConnect(etherHeader *ether, socket s, uint8_t flags, char *data[], uint8_t nargs)
 {
-    uint8_t encodedByte = 0;
+    uint8_t i;
+    uint32_t sum;
+    uint16_t tcpLength;
 
-    do
+    uint8_t localHwAddress[6];
+    uint8_t localIpAddress[4];
+
+    // Ether frame
+    getEtherMacAddress(localHwAddress);
+    getIpAddress(localIpAddress);
+    for (i = 0; i < HW_ADD_LENGTH; i++)
     {
-        encodedByte = X % 128;
-        X /= 128;
-
-        if(X > 0)
-            encodedByte |= 128;
-        return encodedByte;
-    }while(X > 0);
-
-    //return encodedByte;
-}
-
-void mqttGetState(char **mqtt_str)
-{
-    switch(mqttState)
-    {
-    case MQTT_DISCONNECT:
-        *mqtt_str = "DISCONNECTED";
-        break;
-    case MQTT_CONNECT_SENT:
-        *mqtt_str = "CONNECT_SENT";
-        break;
-    case MQTT_CONNECTED:
-        *mqtt_str = "CONNECTED";
-        break;
-    case MQTT_PUBLISH:
-        *mqtt_str = "PUBLISH";
-        break;
-    case MQTT_SUBSCRIBE:
-        *mqtt_str = "SUBSCRIBE";
-        break;
-    case MQTT_UNSUBSCRIBE:
-        *mqtt_str = "UNSUBSCRIBE";
-        break;
+        ether->destAddress[i] = s.remoteHwAddress[i];
+        ether->sourceAddress[i] = localHwAddress[i];
     }
-}
+    ether->frameType = htons(TYPE_IP);
 
-bool isPub(etherHeader* ether)
-{
-    ipHeader *ip = (ipHeader*)ether->data;
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
-
-    if(mqtt_packet->controlHeader == CONTROL_PUBLISH || mqtt_packet->controlHeader == 0x31 || mqtt_packet->controlHeader == 0x32)
-        return true;
-    return false;
-}
-
-void processMqtt(etherHeader* ether, socket* s)
-{
-
-    ipHeader *ip = (ipHeader*)ether->data;
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    //mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
-
-    //if its a publish we receive that means we are subscribed to it
-    //we need to print out the topic name and data onto putty
-    if(isPub(ether))
+    // IP header
+    ipHeader* ip = (ipHeader*)ether->data;
+    
+    ip->rev = 0x4;
+    ip->size = 0x5;
+    ip->typeOfService = 0;
+    ip->id = 0;
+    ip->flagsAndOffset = 0;
+    ip->ttl = 128;
+    ip->protocol = PROTOCOL_TCP;
+    ip->headerChecksum = 0;
+     for (i = 0; i < IP_ADD_LENGTH; i++)
     {
-        int i = 1, j = 0, count = 0;
-        int nameLength = 0;
-        int remainingLength = 0;
-        char str[80] = {};
-
-        //get out of remaining length bytes
-        while((tcp->data[i] & 0x80))
-        {
-            i++;
-            count++;
-        }
-        //i++;
-        i -= count;
-
-        for(j = count; j >= 0; j--)
-        {
-            remainingLength |= tcp->data[i] << (j * 8);
-            if(count != 0)
-            {
-                i++;
-            }
-        }
-        i++;
-
-        //msb/lsb for topic name
-        nameLength = tcp->data[i++] << 8;
-        nameLength |= tcp->data[i++];
-
-        //save topic name to string to print to putty
-        for(j = 0; j < nameLength; j++)
-        {
-            str[j] = (char) tcp->data[i++];
-        }
-        putcUart0('\n');
-        putsUart0("Topic Name: ");
-        putsUart0(str);
-        putcUart0('\n');
-
-        //print out remaining message length which is data
-        memset(str, '\0', sizeof(str));
-
-        for(j = 0; j < (remainingLength - nameLength - 2); j++)
-        {
-            str[j] = (char) tcp->data[i++];
-        }
-        putsUart0("Data: ");
-        putsUart0(str);
-        putsUart0("\n\n");
+        ip->destIp[i] = s.remoteIpAddress[i];
+        ip->sourceIp[i] = localIpAddress[i];
     }
+    uint8_t ipHeaderLength = ip->size * 4;
+
+    // TCP header
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+    tcp->sourcePort = htons(s.localPort);
+    tcp->destPort = htons(s.remotePort);
+    tcp->sequenceNumber = htonl(s.acknowledgementNumber);
+    tcp->acknowledgementNumber = htonl(s.sequenceNumber);   
+    tcp->offsetFields = htons(PSH | ACK | 0x5000);
+    tcp->windowSize = htons(1500);
+    tcp->urgentPointer = 0;
+
+    // MQTT Packet
+    uint16_t mqttLength = 0;
+    uint8_t *mqtt = tcp->data;
+
+    mqtt[mqttLength++] = CONNECT;
+    uint8_t *mqttRemainingLength = &(mqtt[mqttLength++]);
+    mqttRemainingLength[0] = 0x00;
+    // mqtt[mqttLength++] = 0x00;
+    
+    mqtt[mqttLength++] = 0x0;
+    mqtt[mqttLength++] = 0x04;
+    mqtt[mqttLength++] = 'M';
+    mqtt[mqttLength++] = 'Q';
+    mqtt[mqttLength++] = 'T';
+    mqtt[mqttLength++] = 'T';
+    mqtt[mqttLength++] = 0x04; // MQTT v3.1.1
+    mqtt[mqttLength++] = flags; // Connect Flags
+    mqtt[mqttLength++] = 0xFF; // Keep alive seconds
+    mqtt[mqttLength++] = 0xFF;
+
+    uint16_t argumentLength = 0;
+    uint8_t argumentIndex = 0;
+    char *arg;
+    while(argumentIndex < nargs)
+    {
+        arg = &(data[argumentIndex]);
+        argumentLength = getArgumentLength(arg);
+        mqtt[mqttLength++] = (argumentLength >> 8) & 0xFF;
+        mqtt[mqttLength++] = argumentLength & 0xFF;
+        for(i = 0; i < argumentLength; i++)
+            mqtt[mqttLength++] = arg[i];
+        argumentIndex++;
+    }
+    
+
+    if(mqttLength > 0x7F)
+        mqttRemainingLength[0] |= 0x80;
+    mqttRemainingLength[0] |= (mqttLength & 0x7F);
+    // mqttRemainingLength[1] = (mqttLength >> 7) & 0x7F;
+
+    s.acknowledgementNumber += mqttLength;
+    tcpLength = sizeof(tcpHeader) + mqttLength;
+    ip->length = htons(ipHeaderLength + tcpLength);
+
+    // 32-bit sum over ip header
+    calcIpChecksum(ip);
+    // 32-bit sum over TCP header
+    calcTcpChecksum(ip, tcpLength);
+    // send packet with size = ether + ip header + TCP header + MQTT packet
+    putEtherPacket(ether, sizeof(etherHeader) + ipHeaderLength + tcpLength);
 }
 
-
-void sendMqttConnect(etherHeader *ether, socket *s, uint8_t flags, char* clientID)
+uint16_t getArgumentLength(char *str)
 {
-    int i = 0;
-    ipHeader *ip = (ipHeader*)ether->data;
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
+    uint16_t size = 0;
+    while(str[size] != '\0' && str[size] != '-')
+        size++;
+    return size;
+}
 
-    mqtt_packet->controlHeader = CONTROL_CONNECT;
-    mqtt_packet->remainingLength = encodeLength(sizeof(mqttConnectHeader) + strlen(clientID) + 2);
+void mqttSubscribe(etherHeader *ether, socket s, uint8_t QoS, char *data[], uint8_t nargs)
+{
+    uint8_t i;
+    uint32_t sum;
+    uint16_t tcpLength;
+    uint8_t localHwAddress[6];
+    uint8_t localIpAddress[4];
+    uint16_t topicLength;
 
-    //1 for control header, 1 for uint8_t data[0]
-    uint16_t dataSize = 2 + mqtt_packet->remainingLength;
-
-    mqttConnectHeader* connect = (mqttConnectHeader*)mqtt_packet->data;
-
-    connect->protocolLength = htons(0x04);
-    //connect->protocolLength = 4;
-//    connect->msb = 0;
-//    connect->lsb = 4;
-
-    connect->protocolName[0] = 'M';
-    connect->protocolName[1] = 'Q';
-    connect->protocolName[2] = 'T';
-    connect->protocolName[3] = 'T';
-
-    connect->protocolLevel = MQTT_PROTOCOL;
-    connect->controlFlags = flags;
-    connect->keepAliveTime = 60;
-
-    mqttConnectPayload* payload = (mqttConnectPayload*)connect->data;
-    payload->msb_lsb = htons(strlen(clientID));
-
-    for(i = 0; i < strlen(clientID); i++)
+    // Ether frame
+    getEtherMacAddress(localHwAddress);
+    getIpAddress(localIpAddress);
+    for (i = 0; i < HW_ADD_LENGTH; i++)
     {
-        payload->data[i] = clientID[i];
+        ether->destAddress[i] = s.remoteHwAddress[i];
+        ether->sourceAddress[i] = localHwAddress[i];
+    }
+    ether->frameType = htons(TYPE_IP);
+
+    // IP header
+    ipHeader* ip = (ipHeader*)ether->data;
+    
+    ip->rev = 0x4;
+    ip->size = 0x5;
+    ip->typeOfService = 0;
+    ip->id = 0;
+    ip->flagsAndOffset = 0;
+    ip->ttl = 128;
+    ip->protocol = PROTOCOL_TCP;
+    ip->headerChecksum = 0;
+     for (i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        ip->destIp[i] = s.remoteIpAddress[i];
+        ip->sourceIp[i] = localIpAddress[i];
+    }
+    uint8_t ipHeaderLength = ip->size * 4;
+
+    // TCP header
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+    tcp->sourcePort = htons(s.localPort);
+    tcp->destPort = htons(s.remotePort);
+    tcp->sequenceNumber = htonl(s.acknowledgementNumber);
+    tcp->acknowledgementNumber = htonl(s.sequenceNumber);   
+    tcp->offsetFields = htons(PSH | ACK | 0x5000);
+    tcp->windowSize = htons(1500);
+    tcp->urgentPointer = 0;
+    
+
+    uint16_t mqttLength = 0;
+    uint8_t *mqtt = tcp->data;
+
+    mqtt[mqttLength++] = (SUBSCRIBE << 4);
+    uint8_t *mqttRemainingLength = &(mqtt[mqttLength++]);
+    mqttRemainingLength[0] = 0x00;
+    mqtt[mqttLength++] = 0x00;
+
+
+    mqtt[mqttLength++] = ((s.localPort & 0xF) >> 8) & 0xFF;
+    mqtt[mqttLength++] = (s.localPort & 0xF) & 0xFF;
+
+    uint16_t argumentLength = 0;
+    uint8_t argumentIndex = 0;
+    while(argumentIndex < nargs)
+    {
+        argumentLength = getArgumentLength(&(data[argumentIndex]));
+        mqtt[mqttLength++] = (argumentLength >> 8) & 0xFF;
+        mqtt[mqttLength++] = argumentLength & 0xFF;
+        for(i = 0; i < argumentLength; i++)
+            mqtt[mqttLength++] = data[argumentIndex][i];
+        argumentIndex++;
+    }
+    mqtt[mqttLength++] = QoS;
+
+
+    if(mqttLength > 0x7F)
+        mqttRemainingLength[0] |= 0x80;
+    mqttRemainingLength[0] |= (mqttLength & 0x7F);
+    mqttRemainingLength[1] = (mqttLength >> 7) & 0x7F;
+    s.acknowledgementNumber += mqttLength;
+    tcpLength = sizeof(tcpHeader) + mqttLength;
+    ip->length = htons(ipHeaderLength + tcpLength);
+
+    // 32-bit sum over ip header
+    calcIpChecksum(ip);
+    // 32-bit sum over TCP header
+    calcTcpChecksum(ip, tcpLength);
+    // send packet with size = ether + ip header + TCP header + MQTT packet
+    putEtherPacket(ether, sizeof(etherHeader) + ipHeaderLength + tcpLength);
+}
+
+void mqttPublish(etherHeader *ether, socket s, uint8_t QoS, char *data[], uint8_t nargs)
+{
+    uint8_t i;
+    uint32_t sum;
+    uint16_t tcpLength;
+    uint8_t localHwAddress[6];
+    uint8_t localIpAddress[4];
+    uint16_t topicLength;
+
+    // Ether frame
+    getEtherMacAddress(localHwAddress);
+    getIpAddress(localIpAddress);
+    for (i = 0; i < HW_ADD_LENGTH; i++)
+    {
+        ether->destAddress[i] = s.remoteHwAddress[i];
+        ether->sourceAddress[i] = localHwAddress[i];
+    }
+    ether->frameType = htons(TYPE_IP);
+
+    // IP header
+    ipHeader* ip = (ipHeader*)ether->data;
+    
+    ip->rev = 0x4;
+    ip->size = 0x5;
+    ip->typeOfService = 0;
+    ip->id = 0;
+    ip->flagsAndOffset = 0;
+    ip->ttl = 128;
+    ip->protocol = PROTOCOL_TCP;
+    ip->headerChecksum = 0;
+     for (i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        ip->destIp[i] = s.remoteIpAddress[i];
+        ip->sourceIp[i] = localIpAddress[i];
+    }
+    uint8_t ipHeaderLength = ip->size * 4;
+
+    // TCP header
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+    tcp->sourcePort = htons(s.localPort);
+    tcp->destPort = htons(s.remotePort);
+    tcp->sequenceNumber = htonl(s.acknowledgementNumber);
+    tcp->acknowledgementNumber = htonl(s.sequenceNumber);   
+    tcp->offsetFields = htons(PSH | ACK | 0x5000);
+    tcp->windowSize = htons(1500);
+    tcp->urgentPointer = 0;
+    
+
+
+
+    uint16_t mqttLength = 0;
+    uint8_t *mqtt = tcp->data;
+
+    mqtt[mqttLength++] = (PUBLISH << 4);
+    uint8_t *mqttRemainingLength = &(mqtt[mqttLength++]);
+    mqttRemainingLength[0] = 0x00;
+    mqtt[mqttLength++] = 0x00;
+
+
+    uint16_t argumentLength = 0;
+    uint8_t argumentIndex = 0;
+    while(argumentIndex < nargs)
+    {
+        argumentLength = getArgumentLength(&(data[argumentIndex]));
+        mqtt[mqttLength++] = (argumentLength >> 8) & 0xFF;
+        mqtt[mqttLength++] = argumentLength & 0xFF;
+        for(i = 0; i < argumentLength; i++)
+            mqtt[mqttLength++] = data[argumentIndex][i];
+        argumentIndex++;
     }
 
-    sendTcpMessage(ether, s, PSH | ACK, (uint8_t*) mqtt_packet, dataSize);
+
+    if(mqttLength > 0x7F)
+        mqttRemainingLength[0] |= 0x80;
+    mqttRemainingLength[0] |= (mqttLength & 0x7F);
+    mqttRemainingLength[1] = (mqttLength >> 7) & 0x7F;
+    s.acknowledgementNumber += mqttLength;
+    tcpLength = sizeof(tcpHeader) + mqttLength;
+    ip->length = htons(ipHeaderLength + tcpLength);
+
+    // 32-bit sum over ip header
+    calcIpChecksum(ip);
+    // 32-bit sum over TCP header
+    calcTcpChecksum(ip, tcpLength);
+    // send packet with size = ether + ip header + TCP header + MQTT packet
+    putEtherPacket(ether, sizeof(etherHeader) + ipHeaderLength + tcpLength);
 }
 
-//void sendMqttSubscribe(etherHeader *ether, socket *s, uint16_t packetIdent, char* topicName, uint8_t qosType)
-void sendMqttSubscribe(etherHeader *ether, socket *s, char* topicName)
+void mqttDisconnect(etherHeader *ether, socket s, uint8_t QoS, char *data[], uint8_t nargs)
 {
-    uint16_t i = 0, j = 0;
-    uint8_t data_arr[100];
-    ipHeader *ip = (ipHeader*)ether->data;
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
-    int packetID = random32();
+        uint8_t i;
+    uint32_t sum;
+    uint16_t tcpLength;
+    uint8_t localHwAddress[6];
+    uint8_t localIpAddress[4];
+    uint16_t topicLength;
 
-    mqtt_packet->controlHeader = CONTROL_SUBSCRIBE;
-
-    //packet identifier msb/lsb
-    mqtt_packet->data[i++] = packetID & 0x000000F0;
-    mqtt_packet->data[i++] = packetID & 0x0000000F;
-
-    //payload - topic filter msb/lsb
-    mqtt_packet->data[i++] = strlen(topicName) & 0xF0;
-    mqtt_packet->data[i++] = strlen(topicName) & 0x0F;
-
-    //save topic name into topic name array
-    for(j = 0; j < MAX_TOPICS; j++)
+    // Ether frame
+    getEtherMacAddress(localHwAddress);
+    getIpAddress(localIpAddress);
+    for (i = 0; i < HW_ADD_LENGTH; i++)
     {
-        if(topic_name_arr[j][0] == '\0')
+        ether->destAddress[i] = s.remoteHwAddress[i];
+        ether->sourceAddress[i] = localHwAddress[i];
+    }
+    ether->frameType = htons(TYPE_IP);
+
+    // IP header
+    ipHeader* ip = (ipHeader*)ether->data;
+    
+    ip->rev = 0x4;
+    ip->size = 0x5;
+    ip->typeOfService = 0;
+    ip->id = 0;
+    ip->flagsAndOffset = 0;
+    ip->ttl = 128;
+    ip->protocol = PROTOCOL_TCP;
+    ip->headerChecksum = 0;
+     for (i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        ip->destIp[i] = s.remoteIpAddress[i];
+        ip->sourceIp[i] = localIpAddress[i];
+    }
+    uint8_t ipHeaderLength = ip->size * 4;
+
+    // TCP header
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+    tcp->sourcePort = htons(s.localPort);
+    tcp->destPort = htons(s.remotePort);
+    tcp->sequenceNumber = htonl(s.acknowledgementNumber);
+    tcp->acknowledgementNumber = htonl(s.sequenceNumber);   
+    tcp->offsetFields = htons(PSH | ACK | 0x5000);
+    tcp->windowSize = htons(1500);
+    tcp->urgentPointer = 0;
+    
+
+
+
+    uint16_t mqttLength = 0;
+    uint8_t *mqtt = tcp->data;
+
+    mqtt[mqttLength++] = (DISCONNECT << 4);
+    uint8_t *mqttRemainingLength = &(mqtt[mqttLength++]);
+    mqttRemainingLength[0] = 0x00;
+    mqtt[mqttLength++] = 0x00;
+
+
+    if(mqttLength > 0x7F)
+        mqttRemainingLength[0] |= 0x80;
+    mqttRemainingLength[0] |= (mqttLength & 0x7F);
+    mqttRemainingLength[1] = (mqttLength >> 7) & 0x7F;
+    s.acknowledgementNumber += mqttLength;
+    tcpLength = sizeof(tcpHeader) + mqttLength;
+    ip->length = htons(ipHeaderLength + tcpLength);
+
+    // 32-bit sum over ip header
+    calcIpChecksum(ip);
+    // 32-bit sum over TCP header
+    calcTcpChecksum(ip, tcpLength);
+    // send packet with size = ether + ip header + TCP header + MQTT packet
+    putEtherPacket(ether, sizeof(etherHeader) + ipHeaderLength + tcpLength);    
+}
+
+void sendMqttMessage(etherHeader *ether, socket s, uint8_t controlHeader, uint8_t messageFlags, void *data, uint8_t MAX_ARGUMENT_LENGTH, uint8_t nargs)
+{
+    static uint16_t id = 1;
+    uint8_t i;
+    uint32_t sum;
+    uint16_t tcpLength;
+    uint8_t localHwAddress[6];
+    uint8_t localIpAddress[4];
+
+    // Ether frame
+    getEtherMacAddress(localHwAddress);
+    getIpAddress(localIpAddress);
+    for (i = 0; i < HW_ADD_LENGTH; i++)
+    {
+        ether->destAddress[i] = s.remoteHwAddress[i];
+        ether->sourceAddress[i] = localHwAddress[i];
+    }
+    ether->frameType = htons(TYPE_IP);
+
+    // IP header
+    ipHeader* ip = (ipHeader*)ether->data;
+    
+    ip->rev = 0x4;
+    ip->size = 0x5;
+    ip->typeOfService = 0;
+    ip->id = 0;
+    ip->flagsAndOffset = 0;
+    ip->ttl = 128;
+    ip->protocol = PROTOCOL_TCP;
+    ip->headerChecksum = 0;
+     for (i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        ip->destIp[i] = s.remoteIpAddress[i];
+        ip->sourceIp[i] = localIpAddress[i];
+    }
+    uint8_t ipHeaderLength = ip->size * 4;
+
+    // TCP header
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
+    tcp->sourcePort = htons(s.localPort);
+    tcp->destPort = htons(s.remotePort);
+    tcp->sequenceNumber = htonl(s.acknowledgementNumber);
+    tcp->acknowledgementNumber = htonl(s.sequenceNumber);   
+    tcp->offsetFields = htons(PSH | ACK | 0x5000);
+    tcp->windowSize = htons(1500);
+    tcp->urgentPointer = 0;
+
+
+    uint16_t argumentLength = 0;
+    uint8_t argumentIndex = 0;
+    char *arg;
+
+    // MQTT Packet
+    uint16_t mqttLength = 0;
+    uint8_t *mqtt = tcp->data;
+
+    mqtt[mqttLength++] = controlHeader;
+    uint8_t *mqttRemainingLength = &(mqtt[mqttLength++]);
+    mqttRemainingLength[0] = 0x00;
+    mqtt[mqttLength++] = 0x00;
+    
+    switch(controlHeader & 0xF0)
+    {
+        case CONNECT:
         {
-            strncpy(topic_name_arr[j], topicName, strlen(topicName));
-            topic_name_id[j] = packetID;
+            mqtt[mqttLength++] = 0x0;
+            mqtt[mqttLength++] = 0x04;
+            mqtt[mqttLength++] = 'M';
+            mqtt[mqttLength++] = 'Q';
+            mqtt[mqttLength++] = 'T';
+            mqtt[mqttLength++] = 'T';
+            mqtt[mqttLength++] = 0x04; // MQTT v3.1.1
+            mqtt[mqttLength++] = messageFlags; // Connect Flags
+            mqtt[mqttLength++] = 0xFF; // Keep alive seconds
+            mqtt[mqttLength++] = 0xFF;
             break;
         }
-    }
-
-    //topic filter name
-    for(j = 0; j < strlen(topicName); j++)
-    {
-        mqtt_packet->data[i++] =  topicName[j];
-    }
-
-    //last byte is reserved except for last 2 bits which are qos level
-    mqtt_packet->data[i++] = 0x00;
-
-    //i now holds remaining length amount
-    mqtt_packet->remainingLength = encodeLength(i);
-
-    uint16_t dataSize = 2 + mqtt_packet->remainingLength;
-
-    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
-
-    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
-}
-
-void sendMqttPublish(etherHeader *ether, socket *s, char* topicName, char* topicData)
-{
-    int i = 0, j = 0;
-    uint8_t data_arr[100];
-    ipHeader *ip = (ipHeader*)ether->data;
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
-
-    mqtt_packet->controlHeader = CONTROL_PUBLISH;
-    //mqtt_packet->remainingLength = encodeLength(0);
-
-    //msb/lsb for topic name
-    mqtt_packet->data[i++] = strlen(topicName) & 0xF0;
-    mqtt_packet->data[i++] = strlen(topicName) & 0x0F;
-
-    //topic name itself
-    for(j = 0; j < strlen(topicName); j++)
-    {
-        mqtt_packet->data[i++] = topicName[j];
-    }
-
-    //packet identifier, 2 bytes, always 0x00 for qos 0
-//    mqtt_packet->data[i++] = 0;
-//    mqtt_packet->data[i++] = 0;
-
-    //payload - msb/lsb for topic data
-//    mqtt_packet->data[i++] = strlen(topicData) & 0xF0;
-//    mqtt_packet->data[i++] = strlen(topicData) & 0x0F;
-
-    //topic data itself
-    for(j = 0; j < strlen(topicData); j++)
-    {
-        mqtt_packet->data[i++] = topicData[j];
-    }
-
-    //i--;
-    //i now holds remaining length amount
-    mqtt_packet->remainingLength = encodeLength(i);
-
-    uint16_t dataSize = 2 + mqtt_packet->remainingLength;
-    ///uint16_t dataSize = 2 + i;
-
-    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
-
-    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
-}
-
-void sendMqttUnsub(etherHeader *ether, socket *s, char* topicName)
-{
-    int i = 0, j = 0;
-    uint8_t data_arr[100];
-    ipHeader *ip = (ipHeader*)ether->data;
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
-    int packetID = 0;
-    char str[50];
-    char str1[50];
-
-    mqtt_packet->controlHeader = CONTROL_UNSUB;
-
-    for(j = 0; j < MAX_TOPICS; j++)
-    {
-        strncpy(str, topic_name_arr[j], sizeof(topic_name_arr[j]));
-        strncpy(str1, topicName, sizeof(topicName));
-        if(!strcmp(topicName, topic_name_arr[j]))
+        case UNSUBSCRIBE:
+        case SUBSCRIBE:
+            mqtt[0] |= 0x02;
+        case PINGRESP:
+        case PINGREQ:
         {
-            packetID = topic_name_id[j];
-            memset(topic_name_arr[j], '\0', 80);
+            mqtt[mqttLength++] = id >> 8 & 0xFF;
+            mqtt[mqttLength++] = id & 0xFF;
+            id++;
+            break;
+        }
+        default:
+            break;
+    }
+
+    while(argumentIndex < nargs)
+    {
+        arg = (char *)(data + (argumentIndex * MAX_ARGUMENT_LENGTH));
+        argumentLength = getArgumentLength(arg);
+        mqtt[mqttLength++] = (argumentLength >> 8) & 0xFF;
+        mqtt[mqttLength++] = argumentLength & 0xFF;
+        for(i = 0; i < argumentLength; i++)
+            mqtt[mqttLength++] = arg[i];
+        argumentIndex++;
+        if((controlHeader & 0xF0) == SUBSCRIBE)
+            mqtt[mqttLength++] = messageFlags;
+        if((controlHeader & 0xF0) == PUBLISH)
+        {
+            arg = (char *)(data + (argumentIndex * MAX_ARGUMENT_LENGTH));
+            argumentLength = getArgumentLength(arg);
+            for(i = 0; i < argumentLength; i++)
+                mqtt[mqttLength++] = arg[i];
+            argumentIndex++;
+        }
+            
+    }
+    
+
+    mqttRemainingLength[0] |= 0x80;
+    mqttRemainingLength[0] |= ((mqttLength - 3) & 0x7F);
+    mqttRemainingLength[1] = ((mqttLength - 3) >> 7) & 0x7F;
+
+    s.acknowledgementNumber += mqttLength;
+    tcpLength = sizeof(tcpHeader) + mqttLength;
+    ip->length = htons(ipHeaderLength + tcpLength);
+
+    // 32-bit sum over ip header
+    calcIpChecksum(ip);
+    // 32-bit sum over TCP header
+    calcTcpChecksum(ip, tcpLength);
+    // send packet with size = ether + ip header + TCP header + MQTT packet
+    putEtherPacket(ether, sizeof(etherHeader) + ipHeaderLength + tcpLength);
+}
+
+
+bool isMqtt(etherHeader *ether)
+{
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = ip->size * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    return ntohs(tcp->sourcePort) == 1883;
+}
+
+uint8_t getMqttFlags(uint8_t *data)
+{
+    return data[0] & 0xF0;
+}
+
+uint8_t *getMqttData(uint8_t *data)
+{
+    uint8_t mqttFlag = data[0] & 0xF0;
+    uint32_t msgLength = 0;
+    data++;
+    msgLength += *data & 0x7F;
+    if(*data & 0x80)
+    {
+        msgLength += (*data & 0x7F) << 7;
+        data++;
+        if(*data & 0x80)
+        {
+            data++;
+            msgLength += (*data & 0x7F) << 14;
+            if(*data & 0x80)
+            {
+                data++;
+                msgLength += *data << 21;
+            }   
+        }  
+    } 
+
+
+
+    switch(mqttFlag)
+    {
+        case CONNACK:
+            return &(data[msgLength - 1]);
+        case PUBLISH:
+            return ++data;
+        default:
+            return NULL;
+    }
+}
+
+uint8_t addTopic(char *name, topic *topics, uint8_t topicCount)
+{
+    uint8_t i;
+    for(i = 1; i < topicCount; i++)
+    {
+        if(topics[i].name[0] == '\0')
+        {
+            strcpy(topics[i].name, name);
+            return i;
         }
     }
-
-    //packet identifier msb/lsb
-    mqtt_packet->data[i++] = packetID & 0x000000F0;
-     mqtt_packet->data[i++] = packetID & 0x0000000F;
-    //msb/lsb for topic name
-    mqtt_packet->data[i++] = strlen(topicName) & 0xF0;
-    mqtt_packet->data[i++] = strlen(topicName) & 0x0F;
-
-    //topic name itself
-    for(j = 0; j < strlen(topicName); j++)
-    {
-        mqtt_packet->data[i++] = topicName[j];
-    }
-
-    //i now holds remaining length amount
-    mqtt_packet->remainingLength = encodeLength(i);
-
-    uint16_t dataSize = 2 + mqtt_packet->remainingLength;
-    ///uint16_t dataSize = 2 + i;
-
-    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
-
-    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
+    return 0;
 }
 
-void sendMqttDisconnect(etherHeader *ether, socket *s)
+void removeTopic(uint8_t topicIndex, topic *topics)
 {
-    ipHeader *ip = (ipHeader*)ether->data;
-    uint8_t data_arr[100];
-    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip + (ip->size * 4));
-    mqttHeader* mqtt_packet = (mqttHeader*)tcp->data;
-
-    mqtt_packet->controlHeader = CONTROL_DISCONNECT;
-    mqtt_packet->remainingLength = 0;
-
-    uint16_t dataSize = 2 + mqtt_packet->remainingLength;
-
-    memcpy(data_arr, mqtt_packet, sizeof(mqttHeader) + mqtt_packet->remainingLength);
-
-    sendTcpMessage(ether, s, PSH | ACK, data_arr, dataSize);
+    topics[topicIndex].name[0] = '\0';
 }
 
+uint8_t getTopicIndex(char *name, topic *topics, uint8_t topicCount)
+{
+    uint8_t i;
+    for(i = 1; i < topicCount; i++)
+    {
+        if(strcmp(name, topics[i].name) == 0)
+            return i;
+    }
+    return 0;
+}
 
+void *getMqttMessage(uint8_t *data)
+{
+    uint32_t msgLength;
+    uint16_t topicLength;
 
+    
+    data++;
+    msgLength = 0;
+    msgLength += *data & 0x7F;
+    if(*data & 0x80)
+    {
+        msgLength += (*data & 0x7F) << 7;
+        data++;
+        if(*data & 0x80)
+        {
+            data++;
+            msgLength += (*data & 0x7F) << 14;
+            if(*data & 0x80)
+            {
+                data++;
+                msgLength += *data << 21;
+            }   
+        }  
+    }
+    data++;
+
+    topicLength = 0;
+    topicLength += (data[0] & 0xFF) << 8;
+    topicLength += data[1] & 0xFF;
+
+    return &(data[2 + topicLength]);
+}
+
+uint16_t getMqttMessageLength(uint8_t *data)
+{
+    uint32_t msgLength;
+    uint16_t topicLength;
+    
+    data++;
+    msgLength = 0;
+    msgLength += *data & 0x7F;
+    if(*data & 0x80)
+    {
+        msgLength += (*data & 0x7F) << 7;
+        data++;
+        if(*data & 0x80)
+        {
+            data++;
+            msgLength += (*data & 0x7F) << 14;
+            if(*data & 0x80)
+            {
+                data++;
+                msgLength += *data << 21;
+            }   
+        }  
+    }
+    data++;
+
+    topicLength = 0;
+    topicLength += (data[0] & 0xFF) << 8;
+    topicLength += data[1] & 0xFF;
+
+    return msgLength - topicLength - 2;
+}

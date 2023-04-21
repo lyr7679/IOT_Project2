@@ -84,6 +84,13 @@ void putsUart0(char* str)
         putcUart0(str[i++]);
 }
 
+void putnsUart0(char* str, uint32_t length)
+{
+    uint8_t i = 0;
+    for(i = 0; i < length; i++)
+        putcUart0(str[i]);
+}
+
 // Blocking function that returns with serial data once the buffer is not empty
 char getcUart0(void)
 {

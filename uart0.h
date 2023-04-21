@@ -29,6 +29,7 @@ void initUart0(void);
 void setUart0BaudRate(uint32_t baudRate, uint32_t fcyc);
 void putcUart0(char c);
 void putsUart0(char* str);
+void putnsUart0(char* str, uint32_t length);
 char getcUart0(void);
 bool kbhitUart0(void);
 

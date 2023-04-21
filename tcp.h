@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "ip.h"
-#include "mqtt.h"
+#include "eth0.h"
 
 typedef struct _tcpHeader // 20 or more bytes
 {
@@ -38,24 +38,17 @@ typedef struct _tcpHeader // 20 or more bytes
 } tcpHeader;
 
 // TCP states
-#define TCP_CLOSED 0
-#define TCP_LISTEN 1
-#define TCP_SYN_RECEIVED 2
-#define TCP_SYN_SENT 3
-#define TCP_ESTABLISHED 4
-#define TCP_FIN_WAIT_1 5
-#define TCP_FIN_WAIT_2 6
-#define TCP_CLOSING 7
-#define TCP_CLOSE_WAIT 8
-#define TCP_LAST_ACK 9
-#define TCP_TIME_WAIT 10
-
-// ARP states
-#define ARP_REQ_SENT 11
-#define ARP_REQ_RECEIVED 12
-#define ARP_RES_SENT 13
-#define ARP_RES_RECEIVED 14
-
+#define TCP_CLOSED        0
+#define TCP_LISTEN        1
+#define TCP_SYN_RECEIVED  2
+#define TCP_SYN_SENT      3
+#define TCP_ESTABLISHED   4
+#define TCP_FIN_WAIT_1    5
+#define TCP_FIN_WAIT_2    6
+#define TCP_CLOSING       7
+#define TCP_CLOSE_WAIT    8
+#define TCP_LAST_ACK      9
+#define TCP_TIME_WAIT     10
 
 // TCP offset/flags
 #define FIN 0x0001
@@ -70,36 +63,17 @@ typedef struct _tcpHeader // 20 or more bytes
 #define OFS_SHIFT 12
 
 
-uint8_t tcpState;
-
-uint8_t arpReqFlag;
-uint8_t arpResFlag;
-
-uint8_t tcpSynFlag;
-uint8_t tcpAckFlag;
-uint8_t tcpFinFlag;
-
-uint8_t tcpSynAckFlag;
-uint8_t tcpAckFinFlag;
 //-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------
 
-void tcpSetState(uint8_t state);
-void tcpGetState(char **tcp_str);
-
-bool tcpIsSyn(etherHeader *ether);
-bool tcpIsAck(etherHeader *ether);
-
+void setTcpState(socket *s, uint8_t state);
+void sendTcpMessage(etherHeader *ether, socket s, uint32_t flags, uint8_t data[], uint16_t dataSize);
 bool isTcp(etherHeader *ether);
-
-// TODO: Add functions here
-bool tcpIsFin(etherHeader *ether);
-
-void processTcp(etherHeader *ether, socket *s);
-
-void sendTcpMessage(etherHeader *ether, socket *s, uint16_t flags, uint8_t data[], uint16_t dataSize);
-
-void processArpResponse(etherHeader *ether, socket *s);
-
+uint8_t* getTcpData(etherHeader *ether, socket *s);
+uint16_t getTcpFlags(etherHeader *ether);
+uint8_t isTcpSocketConnected(etherHeader *ether, socket *sockets, uint8_t socketCount);
+bool establishTcpSocket(socket *sockets, uint8_t socketCount ,socket *s);
+void calcTcpChecksum(ipHeader *ip, uint16_t tcpLength);
 #endif
+

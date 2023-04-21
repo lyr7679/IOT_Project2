@@ -16,6 +16,7 @@
 // Device includes, defines, and assembler directives
 //-----------------------------------------------------------------------------
 
+
 #ifndef ARP_H_
 #define ARP_H_
 
@@ -35,6 +36,11 @@ typedef struct _arpPacket // 28 bytes
   uint8_t destAddress[6];
   uint8_t destIp[4];
 } arpPacket;
+
+// // ARP states
+// #define ARP_LISTENING 0
+// #define ARP_
+
 
 //-----------------------------------------------------------------------------
 // Subroutines

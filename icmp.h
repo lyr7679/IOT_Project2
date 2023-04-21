@@ -38,7 +38,9 @@ typedef struct _icmpHeader // 8 bytes
 //-----------------------------------------------------------------------------
 
 bool isPingRequest(etherHeader *ether);
+bool isPingResponse(etherHeader *ether);
 void sendPingResponse(etherHeader *ether);
+void sendPing(etherHeader *ether, socket s);
 
 #endif
 
