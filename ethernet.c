@@ -54,6 +54,7 @@
 #include "udp.h"
 #include "tcp.h"
 #include "mqtt.h"
+#include "wireless.h"
 
 // Pins
 #define RED_LED PORTF,1
@@ -76,7 +77,7 @@
 #define MAX_PACKET_SIZE 1522
 
 #define MAX_SOCKETS 5
-#define MAX_TOPICS 10
+#define MAX_TOPICS 20
 
 #define MAX_ARP_TIMEOUT 5
 #define MAX_TCP_HANDSHAKE_TIMEOUT 5
@@ -87,7 +88,7 @@
 
 //adafruit credentials
 #define IO_USRNAME "uta_iot"
-#define IO_KEY
+#define IO_KEY "aio_Gcuj85SUrrkWY3L5fMdQBbsNYJ7T"
 
 //-----------------------------------------------------------------------------
 // Globals                
@@ -96,6 +97,8 @@
 socket sockets[MAX_SOCKETS];
 topic topics[MAX_TOPICS] = {"", "Lights", "Time", "Convo"};
 uint32_t pingTime;
+
+char topic[30] = "uta_iot/feeds/";
 //-----------------------------------------------------------------------------
 // Flags                
 //-----------------------------------------------------------------------------
@@ -515,6 +518,7 @@ void processShell()
     uint8_t i;
     uint8_t ip[IP_ADD_LENGTH];
     uint32_t* p32;
+    char bufferTemp[80];
 
     if (kbhitUart0())
     {
@@ -533,6 +537,32 @@ void processShell()
             strInput[count] = '\0';
             count = 0;
             token = strtok(strInput, " ");
+//            writeEeprom(10u, 3);
+//            writeEeprom(14u, 0x01000000);
+//            writeEeprom(15u, 0x01020304);
+//            writeEeprom(19u, 0x02000000);
+//            writeEeprom(20u, 0x05010814);
+//            writeEeprom(24u, 0x03000000);
+//            writeEeprom(25u, 0x11223344);
+            if(strcmp(token, "macs") == 0)
+            {
+                snprintf(bufferTemp, 80, "%s", "\nDevice Number\t\tDevice MAC Address\n");
+                putsUart0(bufferTemp);
+                uint32_t temp = 0;
+                uint16_t address = 14u;
+                for(i = 0; i < readEeprom(10u); i++)
+                {
+                    temp = (readEeprom(address) & 0x0F000000) >> 24;
+                    snprintf(bufferTemp, 80, "%d", temp);
+                    putsUart0(bufferTemp);
+                    address += 1u;
+                    temp = readEeprom(address);
+                    snprintf(bufferTemp, 80, "\t\t\t%d.%d.%d.%d\n", (temp & 0xFF000000) >> 24,
+                    (temp & 0x00FF0000) >> 16, (temp & 0x0000FF00) >> 8, (temp & 0x000000FF));
+                    putsUart0(bufferTemp);
+                    address += 4u;
+                }
+            }
             if (strcmp(token, "ifconfig") == 0)
             {
                 displayConnectionInfo();
@@ -617,6 +647,7 @@ void processShell()
                 putsUart0("  ifconfig\r");
                 putsUart0("  reboot\r");
                 putsUart0("  set ip | gw | dns | time | mqtt | sn w.x.y.z\r");
+                putsUart0("  macs (print assigned device MACs)\r");
             }
             if (strcmp(token, "status") == 0)
             {
@@ -1052,6 +1083,12 @@ void processTransmission()
             sendMqttMessage(data, sockets[gf_mqtt_subscribe], SUBSCRIBE, mqttFlags, (void *)mqttMessages, MAX_CHARS, nargs);
         }
         gf_mqtt_subscribe = 0;
+    }
+    if (gf_mqtt_subscribe_caps && )
+    {
+        topicsQueue[topicsIndex]
+        sendMqttMessage(data, sockets[gf_mqtt_subscribe_caps], SUBSCRIBE, mqttFlags, (void *)topicsQueue[], 30, 0);
+        gf_mqtt_subscribe_caps--;
     }
     if (gf_mqtt_subscribe_default)
     {
