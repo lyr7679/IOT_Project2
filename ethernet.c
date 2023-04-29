@@ -134,7 +134,6 @@ uint8_t gf_mqtt_rx_unsuback;
 uint8_t gf_mqtt_connect_default;
 uint8_t gf_mqtt_subscribe_default;
 uint8_t gf_tcp_send_finack;
-
 uint8_t gf_mqtt_rx_suback_default;
 
 
@@ -600,8 +599,6 @@ void processShell()
                             strncpy(inOrOut, "output", 6);
                         snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, strtok(binding[j].description, " "), strtok(NULL, " "));
                     }
-
-
                 }
             }
             if (strcmp(token, "ifconfig") == 0)
@@ -1217,6 +1214,11 @@ void processTransmission()
             gf_mqtt_connect = 0;
         }
     }
+    if(gf_mqtt_device_pub)
+    {
+        sendMqttMessage(data, sockets[gf_mqtt_device_pub], PUBLISH, mqttFlags, (void *)publishMsgQueue, 21, 1);
+        pubRdPtr = (pubRdPtr + 1) % MAX_PUB_MSG_QUEUE_SIZE;
+    }
     if (gf_mqtt_connect_default)
     {
         if(sockets[gf_mqtt_connect_default].state == TCP_ESTABLISHED)
@@ -1481,44 +1483,45 @@ int main(void)
                                                     topicLength = (mqttData[0] << 8) + mqttData[1];
                                                     uint16_t msgLength = getMqttMessageLength(tcpData);
                                                     mqttMessage = getMqttMessage(tcpData);
-                                                    if (strncmp((char *)mqttData+2, "Lights", topicLength) == 0)
-                                                    {
-                                                        if (strncmp((char *)mqttMessage, "on", msgLength) == 0)
-                                                        {
-                                                            setPinValue(GREEN_LED, 1);
-                                                            setPinValue(RED_LED, 1);
-                                                            setPinValue(BLUE_LED, 1);
-                                                        }
-                                                        else if (strncmp((char *)mqttMessage, "green", msgLength) == 0)
-                                                            togglePinValue(GREEN_LED);
-                                                        else if (strncmp((char *)mqttMessage, "red", msgLength) == 0)
-                                                            togglePinValue(RED_LED);
-                                                        else if (strncmp((char *)mqttMessage, "blue", msgLength) == 0)
-                                                            togglePinValue(BLUE_LED);
-                                                        else if (strncmp((char *)mqttMessage, "off", msgLength) == 0)
-                                                        {
-                                                            setPinValue(GREEN_LED, 0);
-                                                            setPinValue(RED_LED, 0);
-                                                            setPinValue(BLUE_LED, 0);
-                                                        }
+                                                    // Forward topic 
+                                                //     if (strncmp((char *)mqttData+2, "Lights", topicLength) == 0)
+                                                //     {
+                                                //         if (strncmp((char *)mqttMessage, "on", msgLength) == 0)
+                                                //         {
+                                                //             setPinValue(GREEN_LED, 1);
+                                                //             setPinValue(RED_LED, 1);
+                                                //             setPinValue(BLUE_LED, 1);
+                                                //         }
+                                                //         else if (strncmp((char *)mqttMessage, "green", msgLength) == 0)
+                                                //             togglePinValue(GREEN_LED);
+                                                //         else if (strncmp((char *)mqttMessage, "red", msgLength) == 0)
+                                                //             togglePinValue(RED_LED);
+                                                //         else if (strncmp((char *)mqttMessage, "blue", msgLength) == 0)
+                                                //             togglePinValue(BLUE_LED);
+                                                //         else if (strncmp((char *)mqttMessage, "off", msgLength) == 0)
+                                                //         {
+                                                //             setPinValue(GREEN_LED, 0);
+                                                //             setPinValue(RED_LED, 0);
+                                                //             setPinValue(BLUE_LED, 0);
+                                                //         }
                                                             
-                                                    }
-                                                    else if (strncmp((char *)mqttData+2, "Time", topicLength) == 0)
-                                                    {
-                                                        putsUart0("Uptime: ");
-                                                        putnsUart0((char *)mqttMessage, msgLength);
-                                                        putsUart0("\n");
-                                                    }
-                                                    else
-                                                    {
-                                                        putsUart0("From Topic: ");
-                                                        putnsUart0((char *) &(mqttData[2]), topicLength);
-                                                        putsUart0("\nMessage: ");
-                                                        putnsUart0((char *)mqttMessage, msgLength);
-                                                        putsUart0("\n");
-                                                    }
-                                                    break;  
-                                                }
+                                                //     }
+                                                //     else if (strncmp((char *)mqttData+2, "Time", topicLength) == 0)
+                                                //     {
+                                                //         putsUart0("Uptime: ");
+                                                //         putnsUart0((char *)mqttMessage, msgLength);
+                                                //         putsUart0("\n");
+                                                //     }
+                                                //     else
+                                                //     {
+                                                //         putsUart0("From Topic: ");
+                                                //         putnsUart0((char *) &(mqttData[2]), topicLength);
+                                                //         putsUart0("\nMessage: ");
+                                                //         putnsUart0((char *)mqttMessage, msgLength);
+                                                //         putsUart0("\n");
+                                                //     }
+                                                //     break;  
+                                                // }
                                         }
                                         break;
                                     case (FIN | ACK):

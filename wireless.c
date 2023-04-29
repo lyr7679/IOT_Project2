@@ -1097,12 +1097,25 @@ int main()
             }
             else if (wp->packetType == PUSH)
             {
-                pushMessage *pmsg = (pushMessage*)wp->data;
+                pushMessage *pushMsg = (pushMessage*)wp->data;
                 
+                // Get deviceNumber from timeslot number
+                MQTTBinding binding[3];
+                strncpy(binding[0].client_id, "device", 6);
+                // binding.client_id[0][6] = timeSlot;
+                strncpy(binding[0].devCaps, pushMsg->topicName, 5);
                 // Find full topic name
-                uint8_t i;
-                for(i = 0; i < 19; i++)
-                    publishMsgQueue[pubWrPtr++][i] = pmsg->data[i];
+                bool isDevicePresent = mqtt_binding_table_get(&binding);
+                // TODO add message to publishMsgQueue
+                if(isDevicePresent)
+                {
+                    if((pubWrPtr + 1) % MAX_PUB_MSG_QUEUE_SIZE != pubRdPtr)
+                        strcpy(publishMsgQueue[pubWrPtr++], binding[0].topic);
+                }
+
+
+
+                
             }
             else
             {

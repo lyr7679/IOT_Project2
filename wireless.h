@@ -111,12 +111,14 @@ typedef struct _deviceCaps
     description caps[3];              // 18 bytes
 } deviceCaps;
 
-// 22 bytes
+// 21 bytes
 typedef struct _pushMessage
 {
-    uint8_t topicName;              // 1 byte
-    uint8_t remainingLength;        // 1 byte
-    char data[19];                  // 19 bytes
+    // uint8_t topicName;              // 1 byte
+    // uint8_t remainingLength;        // 1 byte
+    // char data[19];                  // 19 bytes
+    char topicName[5];
+    char topicMessage[16];
 } pushMessage;
 
 
@@ -124,12 +126,16 @@ typedef struct _pushMessage
 //******************************************************
 
 //Extern variables
-
 uint8_t gf_mqtt_subscribe_caps;
 uint8_t numOfSubCaps;
+uint8_t gf_mqtt_device_pub;
 
 char subTopicQueue[3][30];
-char publishMsgQueue[3][30];
+
+#define MAX_PUB_MSG_QUEUE_SIZE 10
+char publishMsgQueue[MAX_PUB_MSG_QUEUE_SIZE][];
+uint8_t pubWrPtr = 0;
+uint8_t pubRdPtr = 0;
 
 //-------------------------------------------------------
 // Declare external variables for nrfSyncEnabled, nrfJoinEnabled and nrfJoinEnabled_BR
