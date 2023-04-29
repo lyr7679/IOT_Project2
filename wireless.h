@@ -128,6 +128,9 @@ typedef struct _pushMessage
 uint8_t gf_mqtt_subscribe_caps;
 uint8_t numOfSubCaps;
 
+char subTopicQueue[3][30];
+char publishMsgQueue[3][30];
+
 //-------------------------------------------------------
 // Declare external variables for nrfSyncEnabled, nrfJoinEnabled and nrfJoinEnabled_BR
 

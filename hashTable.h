@@ -34,9 +34,12 @@
 #include "wait.h"
 
 typedef struct {
-    char client_id[16];
-    char topic[32];
-    uint8_t qos;
+    char client_id[16];          // dev0
+    char topic[30];           // uta_iot/feed/mtrsp
+    char devCaps[5];          // mtsp
+    char description[50];     // motor speed
+    uint8_t inOut;
+    uint8_t numOfCaps;
     uint16_t nextAddr;
 } MQTTBinding;
 
@@ -45,8 +48,8 @@ typedef struct {
 //-----------------------------------------------------------------------------
 
 uint32_t fnv1_hash(const char *str);
-void mqtt_binding_table_put(const char *client_id, const char *topic, uint8_t qos);
-bool mqtt_binding_table_get(const char *client_id, MQTTBinding *binding);
+void mqtt_binding_table_put(MQTTBinding **binding);
+bool mqtt_binding_table_get(MQTTBinding **binding);
 void mqtt_binding_table_remove(const char *client_id);
 
 #endif // HASH_TABLE_H_

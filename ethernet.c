@@ -55,6 +55,7 @@
 #include "tcp.h"
 #include "mqtt.h"
 #include "wireless.h"
+#include "hashTable.h"
 
 // Pins
 #define RED_LED PORTF,1
@@ -90,6 +91,10 @@
 #define IO_USRNAME "uta_iot"
 #define IO_KEY "aio_Gcuj85SUrrkWY3L5fMdQBbsNYJ7T"
 
+#define INPUT 1
+#define OUTPUT 0
+
+
 //-----------------------------------------------------------------------------
 // Globals                
 //-----------------------------------------------------------------------------
@@ -98,7 +103,7 @@ socket sockets[MAX_SOCKETS];
 topic topics[MAX_TOPICS] = {"", "Lights", "Time", "Convo"};
 uint32_t pingTime;
 
-char topic[30] = "uta_iot/feeds/";
+char longTopic[30] = "uta_iot/feeds/";
 //-----------------------------------------------------------------------------
 // Flags                
 //-----------------------------------------------------------------------------
@@ -561,6 +566,42 @@ void processShell()
                     (temp & 0x00FF0000) >> 16, (temp & 0x0000FF00) >> 8, (temp & 0x000000FF));
                     putsUart0(bufferTemp);
                     address += 4u;
+                }
+            }
+            if(strcmp(token, "showCaps") == 0)
+            {
+                MQTTBinding binding[3];
+                uint32_t currentNumber;
+                uint16_t address = 14u, j = 0;
+                char * inOrOut;
+                snprintf(bufferTemp, 80, "%s", "\nDevice Number\tType\tFunction\tUnits\n");
+                for(i = 0; i < readEeprom(10u); i++)
+                {
+                    currentNumber = (readEeprom(address) & 0x0F000000) >> 24;
+                    address += 5;
+
+                    for(j = 0; j < 3; j++)
+                    {
+                        binding[j].client_id[0] = 'd';
+                        binding[j].client_id[1] = 'e';
+                        binding[j].client_id[2] = 'v';
+                        binding[j].client_id[3] = 'i';
+                        binding[j].client_id[4] = 'c';
+                        binding[j].client_id[5] = 'e';
+                        binding[j].client_id[6] = currentNumber + '0';
+                    }
+                    mqtt_binding_table_get(&binding);
+
+                    for(j = 0; j < binding[0].numOfCaps; j++)
+                    {
+                        if(binding[j].inOut == INPUT)
+                            strncpy(inOrOut, "input", 5);
+                        else if(binding[j].inOut == OUTPUT)
+                            strncpy(inOrOut, "output", 6);
+                        snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, strtok(binding[j].description, " "), strtok(NULL, " "));
+                    }
+
+
                 }
             }
             if (strcmp(token, "ifconfig") == 0)
@@ -1084,11 +1125,11 @@ void processTransmission()
         }
         gf_mqtt_subscribe = 0;
     }
-    if (gf_mqtt_subscribe_caps && )
+    if (gf_mqtt_subscribe_caps && numOfSubCaps)
     {
-        topicsQueue[topicsIndex]
-        sendMqttMessage(data, sockets[gf_mqtt_subscribe_caps], SUBSCRIBE, mqttFlags, (void *)topicsQueue[], 30, 0);
-        gf_mqtt_subscribe_caps--;
+        // topicsQueue[topicsIndex]
+        sendMqttMessage(data, sockets[gf_mqtt_subscribe_caps], SUBSCRIBE, mqttFlags, (void *)subTopicQueue[numOfSubCaps - 1], 30, 0);
+        numOfSubCaps--;
     }
     if (gf_mqtt_subscribe_default)
     {

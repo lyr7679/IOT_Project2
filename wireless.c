@@ -13,6 +13,7 @@
 #include "eeprom.h"
 #include "uart0.h"
 #include "wireless.h"
+#include "hashTable.h"
 
 
 bool nrfSyncEnabled = false;
@@ -34,8 +35,7 @@ uint16_t Rx_index =0;                               // read index
 uint16_t Rx_wrIndex =0;                             // write index
 uint8_t payloadlength =32;
 
-char topicsQueue[3][30];
-uint8_t topicsIndex = 0;
+
 
 //*************CODE ADDED by Velu Manohar***************
 uint8_t buffer[MAX_WIRELESS_PACKET_SIZE] = {0};
@@ -991,6 +991,30 @@ void cmdHandler(){                                              // change this l
     }
 }
 
+void capToDescription(char * devCap, char * description)
+{
+    if(strcmp(devCap, "MTRSP") == 0)
+        strcpy(description, "Motor Speed Fast Medium Slow");
+    
+    else if(strcmp(devCap, "MTRDR") == 0)
+        strcpy(description, "Motor Direction Forward Reverse"); 
+
+    else if(strcmp(devCap, "MTRPW") == 0)
+        strcpy(description, "Motor Power Start Stop");  
+
+    else if(strcmp(devCap, "TEMPF") == 0)
+        strcpy(description, "Temperature Degrees(Farenheit)"); 
+
+    else if(strcmp(devCap, "BARCO") == 0)
+        strcpy(description, "Barcode Code");  
+
+    else if(strcmp(devCap, "DISTC") == 0)
+        strcpy(description, "Distance_Sensor Count");   
+
+    else if(strcmp(devCap, "DISTO") == 0)
+        strcpy(description, "Distance_Sensor Detect");
+}
+
 
 int main()
 {
@@ -1031,19 +1055,54 @@ int main()
             else if (wp->packetType == DEVCAPS_RESPONSE)
             {
                 deviceCaps *devCaps = (deviceCaps*)wp->data;
+                char * descrip;
 
-                 for(int i = 0; i < devCaps->numOfCaps; i++)
-                 {
-                     strncpy(topic + 14, devCaps->caps[i], strlen(devCaps->caps[i]));
-                     strcpy(topicsQueue[topicsIndex], topic);
-                     topicsIndex = (topicsIndex + 1) % 3;
-                     //topic[15] = devCaps->caps[i][0];
-                 }
-                 numOfSubCaps = devCaps->numOfCaps;
+                for(int i = 0; i < devCaps->numOfCaps; i++)
+                {
+                    strncpy(longTopic + 14, devCaps->caps[i], strlen(devCaps->caps[i]));
+                    strcpy(topicsQueue[i], longTopic);
+                    //topic[15] = devCaps->caps[i][0];
+                }
+                numOfSubCaps = devCaps->numOfCaps;
+                // Check if device is present in EEEPROM
+                MQTTBinding binding[3];
+                uint8_t i;
+                for(i = 0; i < devCaps->numOfCaps; i++)
+                {
+                    binding.client_id[i][0] = 'd';
+                    binding.client_id[i][1] = 'e';
+                    binding.client_id[i][2] = 'v';
+                    binding.client_id[i][3] = 'i';
+                    binding.client_id[i][4] = 'c';
+                    binding.client_id[i][5] = 'e';
+                    binding.client_id[i][6] = devCaps->deviceNum + '0';
+                }
+
+                bool isDevicePresent = mqtt_binding_table_get(&binding);
+                if(!isDevicePresent)
+                {
+                    for(i = 0; i < devCaps->numOfCaps; i++)
+                    {
+                        capToDescription(devCaps->caps[i]->capDescription, descrip);
+
+                        strncpy(binding[i].topic, topicsQueue[i], strlen(topicsQueue[i]));
+                        strncpy(binding[i].devCaps, devCaps->caps[i]->capDescription, strlen(devCaps->caps[i]->capDescription));
+                        strncpy(binding[i].description, descrip, strlen(descrip));
+                        binding[i].inOut = devCaps->caps[i]->inputOrOutput; 
+                    }
+                    mqtt_binding_table_put(&binding);
+                }
+
+
             }
             else if (wp->packetType == PUSH)
             {
                 pushMessage *pmsg = (pushMessage*)wp->data;
+                
+                // Find full topic name
+                uint8_t i;
+                for(i = 0; i < 19; i++)
+                    publishMsgQueue[pubWrPtr++][i] = pmsg->data[i];
             }
             else
             {
