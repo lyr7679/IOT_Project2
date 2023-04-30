@@ -25,6 +25,8 @@
 //  Globals
 // ------------------------------------------------------------------------------
 
+uint8_t mqttBrokerSocketIndex = 0;
+
 // ------------------------------------------------------------------------------
 //  Structures
 // ------------------------------------------------------------------------------
@@ -573,6 +575,14 @@ uint8_t *getMqttData(uint8_t *data)
     }
 }
 
+uint8_t getMqttBrokerSocketIndex(void)
+{
+    return mqttBrokerSocketIndex;
+}
+void setMqttBrokerSocketIndex(uint8_t socketIndex)
+{
+    mqttBrokerSocketIndex = socketIndex;
+}
 uint8_t addTopic(char *name, topic *topics, uint8_t topicCount)
 {
     uint8_t i;

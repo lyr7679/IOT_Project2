@@ -14,6 +14,7 @@
 #include "uart0.h"
 #include "wireless.h"
 #include "hashTable.h"
+#include "mqtt.h" // Added for getMqttBrokerAddress and setMqttBrokerAddress
 
 
 bool nrfSyncEnabled = false;
@@ -36,6 +37,18 @@ uint16_t Rx_wrIndex =0;                             // write index
 uint8_t payloadlength =32;
 
 
+//*************Bridge Data structures***************
+pushMessageDevNum pushMsgBuffer[MAX_PSH_MSG_BUFFER_SIZE];
+uint8_t pushWrPtr = 0;
+uint8_t pushRdPtr = 0;
+
+char pubMsgBuffer[MAX_PUB_MSG_BUFFER_SIZE][2][30]; // each topic/msg can be 30 characters long with 2 arguments (topic,msg)
+uint8_t pubWrPtr = 0;
+uint8_t pubRdPtr = 0;
+
+bool webserverConnectionStatus = false;
+uint8_t webserverDeviceNumber = 0xFF;
+//*******************************************************
 
 //*************CODE ADDED by Velu Manohar***************
 uint8_t buffer[MAX_WIRELESS_PACKET_SIZE] = {0};
@@ -1015,6 +1028,15 @@ void capToDescription(char * devCap, char * description)
         strcpy(description, "Distance_Sensor Detect");
 }
 
+void setWebserverDeviceNumber(uint8_t devNum)
+{
+     webserverDeviceNumber = devNum;
+}
+
+uint8_t getWebserverDeviceNumber(void)
+{
+     return webserverDeviceNumber;
+}
 
 int main()
 {
@@ -1099,24 +1121,35 @@ int main()
             {
                 pushMessage *pushMsg = (pushMessage*)wp->data;
                 
-                // Get deviceNumber from timeslot number
+                // Using Table for long topic name (Not needed)
+                /*
                 MQTTBinding binding[3];
                 strncpy(binding[0].client_id, "device", 6);
-                // binding.client_id[0][6] = timeSlot;
+                // Get deviceNumber from timeslot number
+                // binding.client_id[0][6] = getTimeSlot();
                 strncpy(binding[0].devCaps, pushMsg->topicName, 5);
                 // Find full topic name
                 bool isDevicePresent = mqtt_binding_table_get(&binding);
-                // TODO add message to publishMsgQueue
-                if(isDevicePresent)
+                */
+
+                char topicName[30] = "uta_iot/feeds/"
+                strncat(topicName, pushMsg->topicName, 5);
+                // TODO add message to publishMsgBuffer
+                if((pubWrPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE != pubRdPtr)
                 {
-                    if((pubWrPtr + 1) % MAX_PUB_MSG_QUEUE_SIZE != pubRdPtr)
-                        strcpy(publishMsgQueue[pubWrPtr++], binding[0].topic);
+                    strcpy(pubMsgBuffer[pubWrPtr][PUB_MSG_BUFFER_TOPIC_INDEX], topicName);
+                    strcpy(pubMsgBuffer[pubWrPtr++][PUB_MSG_BUFFER_MSG_INDEX], pushMsg->topicMessage);
                 }
+                gf_mqtt_device_pub = getMqttBrokerSocketIndex();
 
-
-
-                
             }
+            else if (wp->packetType == WEB_SERVER)
+            {
+                uint8_t timeSlot = 0;
+                setWebserverDeviceNumber(timeSlot);
+                webserverConnected = true;
+            }
+
             else
             {
                 putsUart0("Invalid Packet Type\n\n");
@@ -1162,6 +1195,10 @@ int main()
                 }
                 else if (sendPushFlag)
                 {
+                    wp->packetType = PUSH; //always pushing our data
+                    pushMessage *pushData = (pushMessage*)wp->data;
+                    readPushMsgBuffer(pushData);
+
                     // convert data struct to uint8_t
                     nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
                                                                // packet type must equal to PUSH for the devices team
@@ -1176,7 +1213,50 @@ int main()
     }
 }
 
+bool queuePushMsg(pushMessage *pushMsg, uint8_t devNum)
+{
+    if((pushWrPtr + 1) % MAX_PSH_MSG_BUFFER_SIZE == pushRdPtr)
+        return false;
+    
+    
+    strncpy(pushMsgBuffer[pushWrPtr].pushMsg.topicName, pushMsg->topicName, 5);
+    strcpy(pushMsgBuffer[pushWrPtr].pushMsg.topicMessage, pushMsg->topicMessage);
+    pushMsgBuffer[pushWrPtr].devNum = devNum;
+    
+    pushWrPtr = (pushWrPtr + 1) % MAX_PSH_MSG_BUFFER_SIZE;
+    sendPushFlag = true;
+    return true;
+}
+bool readPushMsgBuffer(pushMessageDevNum *pushMsgDevNum)
+{
+    if(pushRdPtr == pushWrPtr)
+        return false;
+    
 
+    strncpy(pushMsgDevNum->pushMsg->topicName, (pushMsgBuffer[pushRdPtr]).pushMsg.topicName, 5);
+    strcpy(pushMsgDevNum->pushMsg->topicMessage, (pushMsgBuffer[pushRdPtr]).pushMsg.topicMessage);
+    pushMessageDevNum->devNum = (pushMsgBuffer[pushRdPtr]).devNum;
+
+    pushRdPtr = (pushRdPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE;
+    return true;
+}
+bool readPubMsgBuffer(char *pubMsg[2][30])
+{
+    if(pubRdPtr == pubWrPtr)
+        return false;
+    
+
+    strcpy(pubMsg[PUB_MSG_BUFFER_TOPIC_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_TOPIC_INDEX]);
+    strcpy(pubMsg[PUB_MSG_BUFFER_MSG_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_MSG_INDEX]);
+    pubRdPtr = (pubRdPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE;
+    return true;
+
+
+}
+bool isPubMsgBufferEmpty(void)
+{
+    return pubRdPtr == pubWrPtr
+}
 /*
 int main()
 {

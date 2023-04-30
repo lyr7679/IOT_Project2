@@ -34,7 +34,7 @@
 #include "wait.h"
 
 typedef struct {
-    char client_id[16];          // dev0
+    char client_id[16];          // device0
     char topic[30];           // uta_iot/feed/mtrsp
     char devCaps[5];          // mtsp
     char description[50];     // motor speed

@@ -89,7 +89,7 @@
 
 //adafruit credentials
 #define IO_USRNAME "uta_iot"
-#define IO_KEY "aio_Gcuj85SUrrkWY3L5fMdQBbsNYJ7T"
+#define IO_KEY ""
 
 #define INPUT 1
 #define OUTPUT 0
@@ -1216,8 +1216,17 @@ void processTransmission()
     }
     if(gf_mqtt_device_pub)
     {
-        sendMqttMessage(data, sockets[gf_mqtt_device_pub], PUBLISH, mqttFlags, (void *)publishMsgQueue, 21, 1);
-        pubRdPtr = (pubRdPtr + 1) % MAX_PUB_MSG_QUEUE_SIZE;
+        char publishMsg[2][30];
+        bool isValidRead = readPubMsgBuffer(&publishMsg);
+        if(isValidRead)
+        {
+            sendMqttMessage(data, sockets[gf_mqtt_device_pub], PUBLISH, mqttFlags, (void *)publishMsg, 30, 2);
+            if(isPubMsgBufferEmpty())
+                gf_mqtt_device_pub = 0;
+        }
+        else
+            gf_mqtt_device_pub = 0;   
+
     }
     if (gf_mqtt_connect_default)
     {
@@ -1443,6 +1452,7 @@ int main(void)
                                                         {
                                                             putsUart0("Connected\n");
                                                             //gf_mqtt_subscribe_default = gf_mqtt_rx_connack;
+                                                            setMqttBrokerSocketIndex(gf_mqtt_rx_connack);
                                                         }
                                                         else
                                                         {
@@ -1480,48 +1490,31 @@ int main(void)
                                                     }
                                                     break;
                                                 case PUBLISH:
+                                                    // Extract topic information and msg from publish
                                                     topicLength = (mqttData[0] << 8) + mqttData[1];
+                                                    char shortTopicName[5];
+                                                    // 0012 uta_iot/feed/mtrsp
+                                                    // 0 1  0123456789ABC
+                                                    strncpy(shortTopicName, mqttData[2 + topicLength - 5], 5);
                                                     uint16_t msgLength = getMqttMessageLength(tcpData);
                                                     mqttMessage = getMqttMessage(tcpData);
-                                                    // Forward topic 
-                                                //     if (strncmp((char *)mqttData+2, "Lights", topicLength) == 0)
-                                                //     {
-                                                //         if (strncmp((char *)mqttMessage, "on", msgLength) == 0)
-                                                //         {
-                                                //             setPinValue(GREEN_LED, 1);
-                                                //             setPinValue(RED_LED, 1);
-                                                //             setPinValue(BLUE_LED, 1);
-                                                //         }
-                                                //         else if (strncmp((char *)mqttMessage, "green", msgLength) == 0)
-                                                //             togglePinValue(GREEN_LED);
-                                                //         else if (strncmp((char *)mqttMessage, "red", msgLength) == 0)
-                                                //             togglePinValue(RED_LED);
-                                                //         else if (strncmp((char *)mqttMessage, "blue", msgLength) == 0)
-                                                //             togglePinValue(BLUE_LED);
-                                                //         else if (strncmp((char *)mqttMessage, "off", msgLength) == 0)
-                                                //         {
-                                                //             setPinValue(GREEN_LED, 0);
-                                                //             setPinValue(RED_LED, 0);
-                                                //             setPinValue(BLUE_LED, 0);
-                                                //         }
-                                                            
-                                                //     }
-                                                //     else if (strncmp((char *)mqttData+2, "Time", topicLength) == 0)
-                                                //     {
-                                                //         putsUart0("Uptime: ");
-                                                //         putnsUart0((char *)mqttMessage, msgLength);
-                                                //         putsUart0("\n");
-                                                //     }
-                                                //     else
-                                                //     {
-                                                //         putsUart0("From Topic: ");
-                                                //         putnsUart0((char *) &(mqttData[2]), topicLength);
-                                                //         putsUart0("\nMessage: ");
-                                                //         putnsUart0((char *)mqttMessage, msgLength);
-                                                //         putsUart0("\n");
-                                                //     }
-                                                //     break;  
-                                                // }
+                                                    pushMessage pshMsg;
+                                                    strncpy(pshMsg.topicName, shortTopicName, 5);
+                                                    strncpy(pshMsg.topicMessage, mqttMessage, msgLength);
+
+                                                    MQTTBinding binding[3];
+                                                    strncpy(binding[0].devCaps, shortTopicName, 5);
+                                                    bool isDevicePresent = mqtt_binding_table_get(&binding);
+
+                                                    if(isDevicePresent)
+                                                    {
+                                                        bool isOverflow = queuePushMsg(&pshMsg, (binding[0].client_id[6]) - '0');
+                                                        if(isOverflow)
+                                                            putsUart0("Push Message Buffer overload\n");
+
+                                                    }                                                    
+                                                break;
+                                            }
                                         }
                                         break;
                                     case (FIN | ACK):

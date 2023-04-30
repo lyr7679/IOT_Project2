@@ -73,6 +73,9 @@ uint8_t getMqttFlags(uint8_t *data);
 
 uint8_t *getMqttData(uint8_t *data);
 
+uint8_t getMqttBrokerSocketIndex(void);
+void setMqttBrokerSocketIndex(uint8_t socketIndex);
+
 uint8_t addTopic(char *name, topic *topics, uint8_t topicCount);
 void removeTopic(uint8_t topicIndex, topic *topics);
 uint8_t getTopicIndex(char *name, topic *topics, uint8_t topicCount);
