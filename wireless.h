@@ -21,8 +21,8 @@
 #define NO_OF_DEV_IN_BRIDGE     (10u)   /*1 word */
 #define DEV1_NO_START           (14u)
 #define DEV1_MAC_START          (15u)
-#define DEV2_NO_START           (21u)
-#define DEV2_MAC_START          (22u)
+#define DEV2_NO_START           (19u)
+#define DEV2_MAC_START          (20u)
 
 //NRF Register addresses
 #define CONFIG      0x00
@@ -62,7 +62,7 @@
 
 //Slot Management Macros
 
-#define GUARD_TIMER             (100u)   // 10 milliseconds
+#define GUARD_TIMER             (500u)   // 10 milliseconds
 #define TX_RX_DELAY             (200u)  // used by waitmicroseconds
 #define TX_RX_DELAY_SLOT        (0.2)   //milliseconds
 #define _32BYTE_PACKETS         (47u)   // 1500/32 , 32 byte packets
@@ -76,13 +76,14 @@
 #define UL1_SLOT    DEF_SLOT_WIDTH +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + UL0_SLOT + GUARD_TIMER
 
 // Packet Types
+//*************CODE ADDED by Velu Manohar***************
 
-#define PING_REQUEST        0x6
-#define PING_RESPONSE       0x1
-#define PUSH                0x2
-#define DEVCAPS_REQUEST     0x3
-#define DEVCAPS_RESPONSE    0x4
-#define WEB_SERVER          0x5
+#define PING_REQUEST 0x0
+#define PING_RESPONSE 0x1
+#define PUSH 0x2
+#define DEVCAPS_REQUEST 0x3
+#define DEVCAPS_RESPONSE 0x4
+#define WEB_SERVER 0x5
 // Struct for wireless packet
 #define MAX_WIRELESS_PACKET_SIZE 22
 
@@ -113,19 +114,39 @@ typedef struct _deviceCaps
 // 21 bytes
 typedef struct _pushMessage
 {
-    char topicName[5];              // 5 byte
-    char data[16];                  // 19 bytes
+    // uint8_t topicName;              // 1 byte
+    // uint8_t remainingLength;        // 1 byte
+    // char data[19];                  // 19 bytes
+    char topicName[5];
+    char topicMessage[16];
 } pushMessage;
 
-
+// Used for Push Message buffer
+typedef struct _pushMessageDevNum
+{
+    pushMessage pushMsg;
+    uint8_t devNum;
+} pushMessageDevNum;
 
 //******************************************************
 
 //Extern variables
+uint8_t gf_mqtt_subscribe_caps;
+uint8_t numOfSubCaps;
+uint8_t gf_mqtt_device_pub;
+
+char subTopicQueue[3][30];
+
+#define MAX_PUB_MSG_BUFFER_SIZE 10
+#define MAX_PSH_MSG_BUFFER_SIZE MAX_PUB_MSG_BUFFER_SIZE
+
+#define PUB_MSG_BUFFER_TOPIC_INDEX 0
+#define PUB_MSG_BUFFER_MSG_INDEX 1
+
+
 
 //-------------------------------------------------------
 // Declare external variables for nrfSyncEnabled, nrfJoinEnabled and nrfJoinEnabled_BR
-extern bool isBridge ;
 
 //see enableSync_BR()
 extern bool nrfSyncEnabled;     // This is made true on the BRIDGE device and is used as a unique identifier of the bridge device
@@ -153,7 +174,7 @@ extern uint16_t packetLength;   // Parse the data in RxPacket array and get the 
 
 // See eepromSetGetDevInfo_BR() and ( nrf24l0RxMsg() >> isJoinPacket block )
 extern uint8_t allocatedDevNum; // Bridge keeps track of allocated device numbers when Mac address is sent in Join Req
-extern uint32_t lastMsgDevNo_br; // Variable containing the device number in the packet sent to Bridge
+
 //-------------------------------------------------------
 // Declare external variables for Rxpacket, Rx_index
 extern uint8_t Rxpacket[DATA_MAX_SIZE]; // This stores the received packets either on Bridge and Device sides and is cleared after packet is processed by callback functions
@@ -264,6 +285,25 @@ void enableSync_BR();
 // Allocate a device num for new device OR Get device number if already available
 uint8_t eepromSetGetDevInfo_BR(uint8_t *data);
 
+// Adds a new pushMessage to the pushMessage buffer to be sent to the various devices
+bool queuePushMsg(pushMessage *pushMsg, uint8_t devNum);
+
+// Reads pubMsg from publishMsgBuffer returns False if buffer is empty
+bool readPushMsgBuffer(pushMessageDevNum *pushMsgDevNum);
+
+// Reads pubMsg from publishMsgBuffer returns False if buffer is empty
+bool readPubMsgBuffer(char pubMsg[1][2][30]);
+
+
+// Returns true if buffer is empty
+bool isPubMsgBufferEmpty(void);
+
+// Returns true if the webserver is connected
+bool isWebserverConnected(void);
+
+// sets if webserver is connected
+void setWebserverDeviceNumber(uint8_t devNum);
+uint8_t getWebserverDeviceNumber(void);
 
 //----------------------------------------------------
 // Timer Internal functions
@@ -308,7 +348,7 @@ void nrf24l0PowerUp();
 // Used for determining the period of sending SYNC Messages
 // See syncRxDevSlot() and nrf24l0TxSync()
 uint32_t getMySlot(uint8_t devno);
-uint32_t getBridgeDevNoAddr_DEV(); // Get the address to be used by device for sending to Bridge
+
 
 //----------------------------------------------------
 // Tx/ Rx functions
