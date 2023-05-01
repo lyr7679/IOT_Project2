@@ -86,7 +86,7 @@ void sumIpWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
 void calcIpChecksum(ipHeader* ip);
 uint16_t getIpChecksum(uint32_t sum);
 
-resetSocket(socket *s);
-isMqttSocket(socket *s);
+void resetSocket(socket *s);
+bool isMqttSocket(socket *s);
 #endif
 
