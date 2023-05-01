@@ -1078,26 +1078,29 @@ int main()
             {
                 deviceCaps *devCaps = (deviceCaps*)wp->data;
                 char * descrip;
+                char tempTopic[30] = {};
+                strncpy(tempTopic, longTopic, strlen(longTopic));
 
                 for(int i = 0; i < devCaps->numOfCaps; i++)
                 {
-                    strncpy(longTopic + 14, devCaps->caps[i], strlen(devCaps->caps[i]));
-                    strcpy(topicsQueue[i], longTopic);
+                    strncpy(tempTopic + strlen(longTopic), devCaps->caps[i], 5);
+                    strcpy(subTopicQueue[i], tempTopic);
                     //topic[15] = devCaps->caps[i][0];
                 }
                 numOfSubCaps = devCaps->numOfCaps;
+                gf_mqtt_subscribe_caps = 1;
                 // Check if device is present in EEEPROM
                 MQTTBinding binding[3];
                 uint8_t i;
                 for(i = 0; i < devCaps->numOfCaps; i++)
                 {
-                    binding.client_id[i][0] = 'd';
-                    binding.client_id[i][1] = 'e';
-                    binding.client_id[i][2] = 'v';
-                    binding.client_id[i][3] = 'i';
-                    binding.client_id[i][4] = 'c';
-                    binding.client_id[i][5] = 'e';
-                    binding.client_id[i][6] = devCaps->deviceNum + '0';
+                    binding[i].client_id[0] = 'd';
+                    binding[i].client_id[1] = 'e';
+                    binding[i].client_id[2] = 'v';
+                    binding[i].client_id[3] = 'i';
+                    binding[i].client_id[4] = 'c';
+                    binding[i].client_id[5] = 'e';
+                    binding[i].client_id[6] = devCaps->deviceNum + '0';
                 }
 
                 bool isDevicePresent = mqtt_binding_table_get(&binding);
@@ -1107,15 +1110,13 @@ int main()
                     {
                         capToDescription(devCaps->caps[i]->capDescription, descrip);
 
-                        strncpy(binding[i].topic, topicsQueue[i], strlen(topicsQueue[i]));
-                        strncpy(binding[i].devCaps, devCaps->caps[i]->capDescription, strlen(devCaps->caps[i]->capDescription));
+                        strncpy(binding[i].topic, subTopicQueue[i], strlen(topicsQueue[i]));
+                        strncpy(binding[i].devCaps, devCaps->caps[i]->capDescription, 5);
                         strncpy(binding[i].description, descrip, strlen(descrip));
                         binding[i].inOut = devCaps->caps[i]->inputOrOutput; 
                     }
                     mqtt_binding_table_put(&binding);
                 }
-
-
             }
             else if (wp->packetType == PUSH)
             {

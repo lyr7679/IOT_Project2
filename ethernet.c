@@ -570,6 +570,7 @@ void processShell()
             if(strcmp(token, "showCaps") == 0)
             {
                 MQTTBinding binding[3];
+                char bindingTemp[30];
                 uint32_t currentNumber;
                 uint16_t address = 14u, j = 0;
                 char * inOrOut;
@@ -597,7 +598,8 @@ void processShell()
                             strncpy(inOrOut, "input", 5);
                         else if(binding[j].inOut == OUTPUT)
                             strncpy(inOrOut, "output", 6);
-                        snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, strtok(binding[j].description, " "), strtok(NULL, " "));
+                        strcpy(bindingTemp, strtok(binding[j].description, " "));
+                        snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, bindingTemp, strtok(NULL, " "));
                     }
                 }
             }
@@ -1124,8 +1126,9 @@ void processTransmission()
     }
     if (gf_mqtt_subscribe_caps && numOfSubCaps)
     {
-        // topicsQueue[topicsIndex]
-        sendMqttMessage(data, sockets[gf_mqtt_subscribe_caps], SUBSCRIBE, mqttFlags, (void *)subTopicQueue[numOfSubCaps - 1], 30, 0);
+        mqttFlags = 0;
+        gf_mqtt_rx_suback = addTopic(subTopicQueue[numOfSubCaps - 1], topics, MAX_TOPICS);
+        sendMqttMessage(data, sockets[gf_mqtt_subscribe_caps], SUBSCRIBE, mqttFlags, (void *)subTopicQueue[numOfSubCaps - 1], 30, 1);
         numOfSubCaps--;
     }
     if (gf_mqtt_subscribe_default)
