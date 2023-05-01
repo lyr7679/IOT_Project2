@@ -20,11 +20,11 @@
 #define PAGE_SIZE        128             // Page size in bytes
 #define MAX_ADDRESS      0xFFFF          // Maximum address in EEPROM (65536)
 #define MAX_NUM_PAGES    0x200           // Maximum page number is 512 or 0x200
-#define MAX_BINDING_SIZE 64              // Max string length of topic names
+#define MAX_BINDING_SIZE 128              // Max string length of topic names
 
-#define HASH_TABLE_SIZE 256
-#define FNV_OFFSET_BASIS 2166136261
-#define FNV_PRIME 16777619
+#define HASH_TABLE_SIZE     256
+#define FNV_OFFSET_BASIS    2166136261
+#define FNV_PRIME           16777619
 
 #include <stdint.h>
 #include <stdbool.h>
