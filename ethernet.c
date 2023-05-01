@@ -100,10 +100,9 @@
 //-----------------------------------------------------------------------------
 
 socket sockets[MAX_SOCKETS];
-topic topics[MAX_TOPICS] = {"", "Lights", "Time", "Convo"};
+topic topics[MAX_TOPICS] = {""};
 uint32_t pingTime;
 
-char longTopic[30] = "uta_iot/feeds/";
 //-----------------------------------------------------------------------------
 // Flags                
 //-----------------------------------------------------------------------------
@@ -571,37 +570,34 @@ void processShell()
             {
                 MQTTBinding binding[3];
                 char bindingTemp[30];
-                uint32_t currentNumber;
-                uint16_t address = 14u, j = 0;
+                char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+                uint16_t j = 0;
                 char * inOrOut;
-                snprintf(bufferTemp, 80, "%s", "\nDevice Number\tType\tFunction\tUnits\n");
-                for(i = 0; i < readEeprom(10u); i++)
+                snprintf(bufferTemp, 80, "%s", "Device Number\tType\tFunction\tUnits\n");
+
+                for(i = 0; i < 4; i++)
                 {
-                    currentNumber = (readEeprom(address) & 0x0F000000) >> 24;
-                    address += 5;
+                    MQTTBinding *isBinding = mqtt_binding_table_get((MQTTBinding **)&binding, 3, tempCaps[i]);
 
-                    for(j = 0; j < 3; j++)
+                    if(isBinding != NULL)
                     {
-                        binding[j].client_id[0] = 'd';
-                        binding[j].client_id[1] = 'e';
-                        binding[j].client_id[2] = 'v';
-                        binding[j].client_id[3] = 'i';
-                        binding[j].client_id[4] = 'c';
-                        binding[j].client_id[5] = 'e';
-                        binding[j].client_id[6] = currentNumber + '0';
-                    }
-                    mqtt_binding_table_get(&binding);
-
-                    for(j = 0; j < binding[0].numOfCaps; j++)
-                    {
-                        if(binding[j].inOut == INPUT)
-                            strncpy(inOrOut, "input", 5);
-                        else if(binding[j].inOut == OUTPUT)
-                            strncpy(inOrOut, "output", 6);
-                        strcpy(bindingTemp, strtok(binding[j].description, " "));
-                        snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, bindingTemp, strtok(NULL, " "));
+                        for(j = 0; j < binding[0].numOfCaps; j++)
+                        {
+                            if(binding[j].inOut == INPUT)
+                                strncpy(inOrOut, "input", 5);
+                            else if(binding[j].inOut == OUTPUT)
+                                strncpy(inOrOut, "output", 6);
+                            strcpy(bindingTemp, strtok(binding[j].description, " "));
+                            snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, bindingTemp, strtok(NULL, " "));
+                        }
                     }
                 }
+
+                if(isWebserverConnected())
+                {
+                    snprintf(bufferTemp, 80, "%d\tRefer to the Web Server\n", getWebserverDeviceNumber());
+                }
+
             }
             if (strcmp(token, "ifconfig") == 0)
             {
@@ -1498,18 +1494,18 @@ int main(void)
                                                     char shortTopicName[5];
                                                     // 0012 uta_iot/feed/mtrsp
                                                     // 0 1  0123456789ABC
-                                                    strncpy(shortTopicName, mqttData[2 + topicLength - 5], 5);
+                                                    strncpy(shortTopicName, (char *)mqttData[2 + topicLength - 5], 5);
                                                     uint16_t msgLength = getMqttMessageLength(tcpData);
                                                     mqttMessage = getMqttMessage(tcpData);
                                                     pushMessage pshMsg;
                                                     strncpy(pshMsg.topicName, shortTopicName, 5);
-                                                    strncpy(pshMsg.topicMessage, mqttMessage, msgLength);
+                                                    strncpy(pshMsg.topicMessage, (char *)mqttMessage, msgLength);
 
                                                     MQTTBinding binding[3];
-                                                    strncpy(binding[0].devCaps, shortTopicName, 5);
-                                                    bool isDevicePresent = mqtt_binding_table_get(&binding);
+//                                                    strncpy(binding[0].devCaps, shortTopicName, 5);
+                                                    MQTTBinding *isDevicePresent = mqtt_binding_table_get((MQTTBinding **)&binding, 3, pshMsg.topicName);
 
-                                                    if(isDevicePresent)
+                                                    if(isDevicePresent != NULL)
                                                     {
                                                         bool isOverflow = queuePushMsg(&pshMsg, (binding[0].client_id[6]) - '0');
                                                         if(isOverflow)

@@ -20,11 +20,11 @@
 #define PAGE_SIZE        128             // Page size in bytes
 #define MAX_ADDRESS      0xFFFF          // Maximum address in EEPROM (65536)
 #define MAX_NUM_PAGES    0x200           // Maximum page number is 512 or 0x200
-#define MAX_BINDING_SIZE 64              // Max string length of topic names
+#define MAX_BINDING_SIZE 128              // Max string length of topic names
 
-#define HASH_TABLE_SIZE 256
-#define FNV_OFFSET_BASIS 2166136261
-#define FNV_PRIME 16777619
+#define HASH_TABLE_SIZE     256
+#define FNV_OFFSET_BASIS    2166136261
+#define FNV_PRIME           16777619
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -34,22 +34,23 @@
 #include "wait.h"
 
 typedef struct {
-    char client_id[16];          // device0
-    char topic[30];           // uta_iot/feed/mtrsp
-    char devCaps[5];          // mtsp
-    char description[50];     // motor speed
-    uint8_t inOut;
-    uint8_t numOfCaps;
-    uint16_t nextAddr;
+    char client_id[16];         // dev0
+    char topic[30];             // uta_iot/feed/mtrsp
+    char devCaps[5];            // mtrsp
+    char description[50];       // motor speed
+    uint8_t inOut;              // whether topic is an input or output
+    uint8_t numOfCaps;          // number of device caps
 } MQTTBinding;
+
 
 //-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------
 
 uint32_t fnv1_hash(const char *str);
-void mqtt_binding_table_put(MQTTBinding **binding);
-bool mqtt_binding_table_get(MQTTBinding **binding);
-void mqtt_binding_table_remove(const char *client_id);
+void mqtt_binding_table_put(MQTTBinding **binding, uint8_t bindings_count);
+MQTTBinding *mqtt_binding_table_get(MQTTBinding **bindings, uint8_t bindings_count, const char *devCaps);
+bool mqtt_binding_table_remove(MQTTBinding **bindings, uint8_t bindings_count, const char *devCaps);
+
 
 #endif // HASH_TABLE_H_

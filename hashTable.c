@@ -30,197 +30,84 @@ uint32_t fnv1_hash(const char *str)
     return hash % HASH_TABLE_SIZE;
 }
 
-void mqtt_binding_table_put(const char *client_id, const char *topic, uint8_t qos)
+
+void mqtt_binding_table_put(MQTTBinding **bindings, uint8_t bindings_count)
 {
-    uint16_t index = fnv1_hash(client_id);
-    uint16_t offsetIndex = index % MAX_BINDING_SIZE;
-    uint16_t previousOffset = 0;
-    MQTTBinding binding;
+    uint8_t i;
+    uint32_t j;
 
-    // Calculate pointer offset
-    if(offsetIndex < MAX_BINDING_SIZE / 2)
+    for ( i = 0; i < bindings_count; i++)
     {
-        index -= offsetIndex;
-    }
-    else
-    {
-        index += MAX_BINDING_SIZE - offsetIndex;
-    }
-
-    // Prepare binding struct data
-    strncpy(binding.client_id, client_id, sizeof(binding.client_id) - 1);
-    binding.client_id[sizeof(binding.client_id) - 1] = '\0';
-    strncpy(binding.topic, topic, sizeof(binding.topic) - 1);
-    binding.topic[sizeof(binding.topic) - 1] = '\0';
-    binding.qos = qos;
-    binding.nextAddr = 0;
-
-    uint16_t entry_addr = index;
-    uint8_t *entry_ptr = (uint8_t *)&binding;
-
-    // Perform write at next available 64-byte offset
-    bool writeComplete = false;
-    while (!writeComplete)
-    {
-        if (i2cEepromRead(EEPROM_ADDRESS, entry_addr) == 0xFF)
+        // Check if the client_id is not empty
+        if (bindings[i]->client_id[0] != '\0')
         {
-            uint8_t i;
-            for (i = 0; i < sizeof(MQTTBinding); i++)
+            uint32_t index = fnv1_hash(bindings[i]->devCaps);
+            uint16_t entry_addr = (uint16_t)(index * sizeof(MQTTBinding));
+
+            // Write the binding to EEPROM
+            uint8_t *binding_ptr = (uint8_t *)bindings[i];
+            for (j = 0; j < sizeof(MQTTBinding); j++)
             {
-                i2cEepromWrite(EEPROM_ADDRESS, entry_addr + i, entry_ptr[i]);
-                // It takes 5ms for a write cycle to be complete
+                i2cEepromWrite(EEPROM_ADDRESS, entry_addr + j, binding_ptr[j]);
                 waitMicrosecond(5000);
             }
-            writeComplete = true;
-        }
-        else if (i2cEepromRead(EEPROM_ADDRESS, entry_addr) != 0xFF) // Check if block is occupied by same device
-        {
-            MQTTBinding readBuffer;
-            uint8_t *read_ptr = (uint8_t *)&readBuffer;
-            uint8_t i;
-            for (i = 0; i < sizeof(MQTTBinding); i++)
-            {
-                read_ptr[i] = i2cEepromRead(EEPROM_ADDRESS, entry_addr + i);
-            }
-
-            if (strncmp(readBuffer.client_id, client_id, sizeof(readBuffer.client_id)) == 0)
-            {
-                previousOffset = entry_addr;
-            }
-
-            if (readBuffer.nextAddr == 0)
-            {
-                entry_addr += MAX_BINDING_SIZE;
-            }
-            else
-            {
-                entry_addr = readBuffer.nextAddr;
-            }
-        }
-        else
-        {
-            entry_addr += MAX_BINDING_SIZE;
-        }
-    }
-
-    // Update previous offset with location of additional binding
-    if (previousOffset != 0)
-    {
-        MQTTBinding readBuffer;
-        uint8_t *read_ptr = (uint8_t *)&readBuffer;
-        uint8_t i;
-        for (i = 0; i < sizeof(MQTTBinding); i++)
-        {
-            read_ptr[i] = i2cEepromRead(EEPROM_ADDRESS, previousOffset + i);
-        }
-
-        readBuffer.nextAddr = entry_addr;
-
-        for (i = 0; i < sizeof(MQTTBinding); i++)
-        {
-            i2cEepromWrite(EEPROM_ADDRESS, previousOffset + i, read_ptr[i]);
-            // It takes 5ms for a write cycle to be complete
-            waitMicrosecond(5000);
         }
     }
 }
 
-bool mqtt_binding_table_get(const char *client_id, MQTTBinding *binding)
+MQTTBinding *mqtt_binding_table_get(MQTTBinding **bindings, uint8_t bindings_count, const char *devCaps)
 {
-    uint16_t index = fnv1_hash(client_id);
-    uint16_t offsetIndex = index % MAX_BINDING_SIZE;
+    uint8_t i;
+    uint32_t j;
 
-    // Calculate pointer offset
-    if(offsetIndex < MAX_BINDING_SIZE / 2)
+    for (i = 0; i < bindings_count; i++)
     {
-        index -= offsetIndex;
-    }
-    else
-    {
-        index += MAX_BINDING_SIZE - offsetIndex;
-    }
-
-    uint16_t entry_addr = index;
-    uint8_t *entry_ptr = (uint8_t *)binding;
-
-    // Read binding from memory
-    bool entrySeen = false;
-    do
-    {
-        bool validClientId = false;
-        // Read binding from current index
-        uint8_t i;
-        for (i = 0; i < sizeof(MQTTBinding); i++)
+        if (strncmp(bindings[i]->devCaps, devCaps, sizeof(bindings[i]->devCaps)) == 0)
         {
-            entry_ptr[i] = i2cEepromRead(EEPROM_ADDRESS, entry_addr + i);
-        }
+            // Read the binding from EEPROM
+            uint32_t index = fnv1_hash(bindings[i]->devCaps);
+            uint16_t entry_addr = (uint16_t)(index * sizeof(MQTTBinding));
+            uint8_t *binding_ptr = (uint8_t *)bindings[i];
 
-        // Smoking gun to view at least one entry in external eeprom
-        if ( entry_ptr[0] != 0xFF )
-        {
-            entrySeen = true;
-        }
-
-        // Verify bindings match read data
-        if (strncmp(binding->client_id, client_id, sizeof(binding->client_id)) == 0)
-        {
-            validClientId = true;
-        }
-        if ( validClientId)
-        {
-            return true;
-        }
-
-        // Prepare for next read
-        entry_addr += MAX_BINDING_SIZE;
-    } while( !entrySeen );
-
-    return false;
-}
-
-void mqtt_binding_table_remove(const char *client_id)
-{
-    MQTTBinding binding;
-
-    if (mqtt_binding_table_get(client_id, &binding))
-    {
-        uint16_t index = fnv1_hash(client_id);
-        uint16_t offsetIndex = index % MAX_BINDING_SIZE;
-
-        // Calculate pointer offset
-        if(offsetIndex < MAX_BINDING_SIZE / 2)
-        {
-            index -= offsetIndex;
-        }
-        else
-        {
-            index += MAX_BINDING_SIZE - offsetIndex;
-        }
-
-        uint16_t entry_addr = index;
-
-        // Read entry to check for additional device entries
-        MQTTBinding readBuffer;
-        do
-        {
-            uint8_t *read_ptr = (uint8_t *)&readBuffer;
-            uint8_t i;
-            for (i = 0; i < sizeof(MQTTBinding); i++)
+            for (j = 0; j < sizeof(MQTTBinding); j++)
             {
-                read_ptr[i] = i2cEepromRead(EEPROM_ADDRESS, entry_addr + i);
+                binding_ptr[j] = i2cEepromRead(EEPROM_ADDRESS, entry_addr + j);
             }
 
-            index = readBuffer.nextAddr;
+            // Return the found binding
+            return bindings[i];
+        }
+    }
 
-            // Write 0xFF to the removed entry
-            for (i = 0; i < sizeof(MQTTBinding); i++)
+    // Return NULL if not found
+    return NULL;
+}
+
+bool mqtt_binding_table_remove(MQTTBinding **bindings, uint8_t bindings_count, const char *devCaps)
+{
+    bool removed = false;
+    uint8_t i;
+    uint32_t j;
+
+    for (i = 0; i < bindings_count; i++)
+    {
+        if (strncmp(bindings[i]->devCaps, devCaps, sizeof(bindings[i]->devCaps)) == 0)
+        {
+            // Write 0xFF to the corresponding EEPROM area
+            uint32_t index = fnv1_hash(bindings[i]->devCaps);
+            uint16_t entry_addr = (uint16_t)(index * sizeof(MQTTBinding));
+
+            for (j = 0; j < sizeof(MQTTBinding); j++)
             {
-                i2cEepromWrite(EEPROM_ADDRESS, entry_addr + i, 0xFF);
-                // It takes 5ms for a write cycle to be complete
+                i2cEepromWrite(EEPROM_ADDRESS, entry_addr + j, 0xFF);
                 waitMicrosecond(5000);
             }
 
-            entry_addr = index;
-        } while( entry_addr != 0 );
+            // Clear the binding in the array
+            memset(bindings[i], 0, sizeof(MQTTBinding));
+            removed = true;
+        }
     }
+
+    return removed;
 }

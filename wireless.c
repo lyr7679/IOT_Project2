@@ -48,6 +48,8 @@ uint8_t pubRdPtr = 0;
 
 bool webserverConnectionStatus = false;
 uint8_t webserverDeviceNumber = 0xFF;
+
+char longTopic[30] = "uta_iot/feeds/";
 //*******************************************************
 
 //*************CODE ADDED by Velu Manohar***************
@@ -1038,6 +1040,11 @@ uint8_t getWebserverDeviceNumber(void)
      return webserverDeviceNumber;
 }
 
+bool isWebserverConnected(void)
+{
+    return webserverConnectionStatus;
+}
+
 int main()
 {
     initSystemClockTo40Mhz();
@@ -1079,43 +1086,48 @@ int main()
                 deviceCaps *devCaps = (deviceCaps*)wp->data;
                 char * descrip;
                 char tempTopic[30] = {};
+                uint8_t i;
                 strncpy(tempTopic, longTopic, strlen(longTopic));
 
-                for(int i = 0; i < devCaps->numOfCaps; i++)
+                for(i = 0; i < devCaps->numOfCaps; i++)
                 {
-                    strncpy(tempTopic + strlen(longTopic), devCaps->caps[i], 5);
+                    strncpy(tempTopic + strlen(longTopic), devCaps->caps[i].capDescription, 5);
                     strcpy(subTopicQueue[i], tempTopic);
                     //topic[15] = devCaps->caps[i][0];
                 }
                 numOfSubCaps = devCaps->numOfCaps;
-                gf_mqtt_subscribe_caps = 1;
+                gf_mqtt_subscribe_caps = getMqttBrokerSocketIndex();
                 // Check if device is present in EEEPROM
                 MQTTBinding binding[3];
-                uint8_t i;
-                for(i = 0; i < devCaps->numOfCaps; i++)
-                {
-                    binding[i].client_id[0] = 'd';
-                    binding[i].client_id[1] = 'e';
-                    binding[i].client_id[2] = 'v';
-                    binding[i].client_id[3] = 'i';
-                    binding[i].client_id[4] = 'c';
-                    binding[i].client_id[5] = 'e';
-                    binding[i].client_id[6] = devCaps->deviceNum + '0';
-                }
 
-                bool isDevicePresent = mqtt_binding_table_get(&binding);
-                if(!isDevicePresent)
+                char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+
+                for(i = 0; i < 4; i++)
                 {
-                    for(i = 0; i < devCaps->numOfCaps; i++)
+                    MQTTBinding *isBinding = mqtt_binding_table_get((MQTTBinding **)&binding, 3, tempCaps[i]);
+
+                    if(isBinding != NULL)
                     {
-                        capToDescription(devCaps->caps[i]->capDescription, descrip);
+                        for(i = 0; i < devCaps->numOfCaps; i++)
+                        {
+                            binding[i].client_id[0] = 'd';
+                            binding[i].client_id[1] = 'e';
+                            binding[i].client_id[2] = 'v';
+                            binding[i].client_id[3] = 'i';
+                            binding[i].client_id[4] = 'c';
+                            binding[i].client_id[5] = 'e';
+                            binding[i].client_id[6] = devCaps->deviceNum + '0';
 
-                        strncpy(binding[i].topic, subTopicQueue[i], strlen(topicsQueue[i]));
-                        strncpy(binding[i].devCaps, devCaps->caps[i]->capDescription, 5);
-                        strncpy(binding[i].description, descrip, strlen(descrip));
-                        binding[i].inOut = devCaps->caps[i]->inputOrOutput; 
+                            description desc = devCaps->caps[i];
+                            capToDescription(desc.capDescription, descrip);
+
+                            strncpy(binding[i].topic, subTopicQueue[i], strlen(subTopicQueue[i]));
+                            strncpy(binding[i].devCaps, desc.capDescription, 5);
+                            strncpy(binding[i].description, descrip, strlen(descrip));
+                            binding[i].inOut = desc.inputOrOutput;
+                        }
+                        mqtt_binding_table_put((MQTTBinding **)&binding, devCaps->numOfCaps);
                     }
-                    mqtt_binding_table_put(&binding);
                 }
             }
             else if (wp->packetType == PUSH)
@@ -1133,9 +1145,11 @@ int main()
                 bool isDevicePresent = mqtt_binding_table_get(&binding);
                 */
 
-                char topicName[30] = "uta_iot/feeds/"
+                char topicName[30] = {};
+                strncpy(topicName, longTopic, strlen(longTopic));
                 strncat(topicName, pushMsg->topicName, 5);
                 // TODO add message to publishMsgBuffer
+
                 if((pubWrPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE != pubRdPtr)
                 {
                     strcpy(pubMsgBuffer[pubWrPtr][PUB_MSG_BUFFER_TOPIC_INDEX], topicName);
@@ -1148,7 +1162,7 @@ int main()
             {
                 uint8_t timeSlot = 0;
                 setWebserverDeviceNumber(timeSlot);
-                webserverConnected = true;
+                webserverConnectionStatus = true;
             }
 
             else
@@ -1197,8 +1211,8 @@ int main()
                 else if (sendPushFlag)
                 {
                     wp->packetType = PUSH; //always pushing our data
-                    pushMessage *pushData = (pushMessage*)wp->data;
-                    readPushMsgBuffer(pushData);
+                    pushMessageDevNum pushData;
+                    readPushMsgBuffer(&pushData);
 
                     // convert data struct to uint8_t
                     nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
@@ -1233,22 +1247,22 @@ bool readPushMsgBuffer(pushMessageDevNum *pushMsgDevNum)
     if(pushRdPtr == pushWrPtr)
         return false;
     
-
-    strncpy(pushMsgDevNum->pushMsg->topicName, (pushMsgBuffer[pushRdPtr]).pushMsg.topicName, 5);
-    strcpy(pushMsgDevNum->pushMsg->topicMessage, (pushMsgBuffer[pushRdPtr]).pushMsg.topicMessage);
-    pushMessageDevNum->devNum = (pushMsgBuffer[pushRdPtr]).devNum;
+    pushMessageDevNum tempMsgBuffer = pushMsgBuffer[pushRdPtr];
+    strncpy(pushMsgDevNum->pushMsg.topicName, tempMsgBuffer.pushMsg.topicName, 5);
+    strcpy(pushMsgDevNum->pushMsg.topicMessage, tempMsgBuffer.pushMsg.topicMessage);
+    pushMsgDevNum->devNum = tempMsgBuffer.devNum;
 
     pushRdPtr = (pushRdPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE;
     return true;
 }
-bool readPubMsgBuffer(char *pubMsg[2][30])
+bool readPubMsgBuffer(char pubMsg[1][2][30])
 {
     if(pubRdPtr == pubWrPtr)
         return false;
     
 
-    strcpy(pubMsg[PUB_MSG_BUFFER_TOPIC_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_TOPIC_INDEX]);
-    strcpy(pubMsg[PUB_MSG_BUFFER_MSG_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_MSG_INDEX]);
+    strcpy(pubMsg[0][PUB_MSG_BUFFER_TOPIC_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_TOPIC_INDEX]);
+    strcpy(pubMsg[0][PUB_MSG_BUFFER_MSG_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_MSG_INDEX]);
     pubRdPtr = (pubRdPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE;
     return true;
 
@@ -1256,7 +1270,7 @@ bool readPubMsgBuffer(char *pubMsg[2][30])
 }
 bool isPubMsgBufferEmpty(void)
 {
-    return pubRdPtr == pubWrPtr
+    return pubRdPtr == pubWrPtr;
 }
 /*
 int main()

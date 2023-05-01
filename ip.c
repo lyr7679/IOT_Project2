@@ -214,14 +214,14 @@ void calcIpChecksum(ipHeader* ip)
     ip->headerChecksum = getIpChecksum(sum);
 }
 
-resetSocket(socket *s)
+void resetSocket(socket *s)
 {
     s->acknowledgementNumber = 0;
     s->sequenceNumber = 0;
     s->state = 0;
 }
 
-isMqttSocket(socket *s)
+bool isMqttSocket(socket *s)
 {
     return s->remotePort == 1883;
 }

@@ -292,7 +292,7 @@ bool queuePushMsg(pushMessage *pushMsg, uint8_t devNum);
 bool readPushMsgBuffer(pushMessageDevNum *pushMsgDevNum);
 
 // Reads pubMsg from publishMsgBuffer returns False if buffer is empty
-bool readPubMsgBuffer(char *pubMsg[2][30]);
+bool readPubMsgBuffer(char pubMsg[1][2][30]);
 
 
 // Returns true if buffer is empty
