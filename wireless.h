@@ -14,7 +14,7 @@
 #define DEF_SYNC_TIME   (5)         // Default Sync message time
 
 //DATA transmission
-#define DATA_MAX_SIZE   (1500u)
+#define DATA_MAX_SIZE   (32u)
 #define META_DATA_SIZE  (2+1+2+4+1)   //startcode + slot + remlen + devBitNum+  checksum
 
 //EEPROM
@@ -114,7 +114,7 @@ typedef struct _deviceCaps
 typedef struct _pushMessage
 {
     char topicName[5];              // 5 byte
-    char data[16];                  // 19 bytes
+    char topicMessage[16];                  // 19 bytes
 } pushMessage;
 
 // Used for Push Message buffer
@@ -126,7 +126,15 @@ typedef struct _pushMessageDevNum
 
 
 //******************************************************
+void initWireless(void);
 
+void processWireless(void);
+
+void sendDevCap(void);
+
+void sendWirelessPing(void);
+
+void sendDevPush(void);
 //Extern variables
 uint8_t gf_mqtt_subscribe_caps;
 uint8_t numOfSubCaps;

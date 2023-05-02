@@ -62,13 +62,13 @@ void initTimer()
     TIMER4_IMR_R |= TIMER_IMR_TATOIM;                // turn-on interrupt
     NVIC_EN2_R |= 1 << (INT_TIMER4A-80);             // turn-on interrupt 86 (TIMER4A)
 
-    for (i = 0; i < NUM_TIMERS; i++)
-    {
-        period[i] = 0;
-        ticks[i] = 0;
-        fn[i] = NULL;
-        reload[i] = false;
-    }
+   for (i = 0; i < NUM_TIMERS; i++)
+   {
+       period[i] = 0;
+       ticks[i] = 0;
+       fn[i] = NULL;
+       reload[i] = false;
+   }
 }
 
 uint32_t getUptime(void)

@@ -89,7 +89,7 @@
 
 //adafruit credentials
 #define IO_USRNAME "uta_iot"
-#define IO_KEY ""
+#define IO_KEY "aio_KmSy234QQLLYKPCTaL2d8ZZJA1oh"
 
 #define INPUT 1
 #define OUTPUT 0
@@ -303,6 +303,8 @@ void initHw()
     selectPinPushPullOutput(BLUE_LED);
     selectPinDigitalInput(PUSH_BUTTON);
     enablePinPullup(PUSH_BUTTON);
+
+    setPinValue(BLUE_LED,1);  
 }
 
 initDefaultTimers()
@@ -540,13 +542,6 @@ void processShell()
             strInput[count] = '\0';
             count = 0;
             token = strtok(strInput, " ");
-//            writeEeprom(10u, 3);
-//            writeEeprom(14u, 0x01000000);
-//            writeEeprom(15u, 0x01020304);
-//            writeEeprom(19u, 0x02000000);
-//            writeEeprom(20u, 0x05010814);
-//            writeEeprom(24u, 0x03000000);
-//            writeEeprom(25u, 0x11223344);
             if(strcmp(token, "macs") == 0)
             {
                 snprintf(bufferTemp, 80, "%s", "\nDevice Number\t\tDevice MAC Address\n");
@@ -566,6 +561,33 @@ void processShell()
                     address += 4u;
                 }
             }
+            if (strcmp(token, "ping") == 0)
+            {
+                sendWirelessPing();
+                
+            }
+            if (strcmp(token, "push") == 0)
+            {
+                sendDevPush();
+                
+            }
+
+            if (strcmp(token, "devCaps") == 0)
+            {
+                sendDevCap();
+            }
+            if (strcmp(token, "reset") == 0)
+            {
+                token = strtok(NULL, " ");
+                if(strcmp(token, "inteeprom") == 0){
+                    for(i=0; i<200; i++){
+                        writeEeprom(i + NO_OF_DEV_IN_BRIDGE , 0x00); // Flash the eeprom
+
+                    }
+                    putsUart0("Cleared Internal Eeprom until 200 bytes\n");
+                }
+            }
+
             if(strcmp(token, "showCaps") == 0)
             {
                 MQTTBinding binding[3];
@@ -689,7 +711,7 @@ void processShell()
             {
                 putsUart0("Prints status\n");
             }
-            if (strcmp(token, "ping") == 0)
+            if (strcmp(token, "ping1") == 0)
             {
                 uint8_t remote_ip[4];
                 for (i = 0; i < IP_ADD_LENGTH; i++)
@@ -1293,7 +1315,7 @@ int main(void)
     // Setup UART0
     initUart0();
     setUart0BaudRate(115200, 40e6);
-
+    initWireless();
     // Init timer
     initTimer();
 
@@ -1303,10 +1325,10 @@ int main(void)
     // Use the value x from the spreadsheet
     putsUart0("\nStarting eth0\n");
     initEther(ETHER_UNICAST | ETHER_BROADCAST | ETHER_HALFDUPLEX);
-    setEtherMacAddress(2, 3, 4, 5, 6, 72);
+    setEtherMacAddress(2, 3, 4, 5, 6, 69);
 
     // Init EEPROM
-    initEeprom();
+    
     readConfiguration();
 
     setPinValue(GREEN_LED, 1);
@@ -1329,6 +1351,8 @@ int main(void)
         processShell();
 
         processTransmission();
+
+        processWireless();
 
         // Packet processing
         if (isEtherDataAvailable())

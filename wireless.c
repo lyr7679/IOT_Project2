@@ -113,10 +113,10 @@ bool debugMsg = false;
 // TEST CODE to check if structs are correct, needs to be deleted and changed with proper shell commands
 // --------------------------------------------------------
 #define MAX_CHARS 80
-uint8_t count = 0;
+uint8_t count1 = 0;
 char strInput[MAX_CHARS+1];
 char* token;
-void processShell(wirelessPacket* message)
+void processShell1(wirelessPacket* message)
 {
     bool end;
     char c;
@@ -127,18 +127,18 @@ void processShell(wirelessPacket* message)
     {
         c = getcUart0();
 
-        end = (c == 13) || (count == MAX_CHARS);
+        end = (c == 13) || (count1 == MAX_CHARS);
         if (!end)
         {
-            if ((c == 8 || c == 127) && count > 0)
-                count--;
+            if ((c == 8 || c == 127) && count1 > 0)
+                count1--;
             if (c >= ' ' && c < 127)
-                strInput[count++] = c;
+                strInput[count1++] = c;
         }
         else
         {
-            strInput[count] = '\0';
-            count = 0;
+            strInput[count1] = '\0';
+            count1 = 0;
             token = strtok(strInput, " ");
             if (strcmp(token, "push") == 0)
             {
@@ -210,7 +210,29 @@ void processShell(wirelessPacket* message)
 
 //////////////////////////////////////////////////////////////
 
+void sendDevCap(void)
+{
+    wirelessPacket* message = (wirelessPacket*)buffer;
+    message->packetType = DEVCAPS_REQUEST;
+    sendDevCapsRequestFlag = true;
+    appSendFlag = true;
+}
+void sendDevPush(void)
+{
+    wirelessPacket* message = (wirelessPacket*)buffer;
+    message->packetType = PUSH;
+    sendPushFlag = true;
+    appSendFlag = true;
+}
 
+void sendWirelessPing(void)
+{
+    
+    wirelessPacket* message = (wirelessPacket*)buffer;
+    message->packetType = PING_REQUEST;
+    sendPingRequestFlag = true;
+    appSendFlag = true;
+}
 
 void nrf24l0Init()
 {
@@ -218,6 +240,7 @@ void nrf24l0Init()
     // Assume that the clocks are initialized already
 
     enablePort(PORTF);
+    _delay_cycles(3);
     selectPinPushPullOutput(SYNC_LED);                      //RED LED
     selectPinPushPullOutput(JOIN_LED);                      //BLUE LED
     selectPinDigitalInput(JOIN_BUTTON);
@@ -240,7 +263,7 @@ void nrf24l0Init()
 
     initTimer_ms();
 
-    setPinValue(JOIN_LED, 1);                               // Init Flash
+    setPinValue(JOIN_LED,1);                               // Init Flash
     waitMicrosecond(100000);
     setPinValue(JOIN_LED, 0);
     waitMicrosecond(100000);
@@ -407,7 +430,7 @@ void TimerHandler_BR()
         stopTimer_ms(joinAccessSlot_BR);
         stopTimer_ms(uplinkSlot_BR);
 
-        putsUart0("ts -BR\n");
+        // putsUart0("ts -BR\n");
         startOneshotTimer_ms(downlinkSlot_BR, DL_SLOT);
         startOneshotTimer_ms(fastackSlot_BR, FACK_SLOT);
         startOneshotTimer_ms(joinAccessSlot_BR, ACCESS_SLOT);
@@ -589,7 +612,7 @@ void parsenrf24l01DataPacket(){
         putsUart0("\n");
     }
 
-    // check sync. Last byte for frame count is omitted
+    // check sync. Last byte for frame count1 is omitted
     if(strncmp((char*)&Rxpacket[Rx_wrIndex - payloadlength], (char*)syncMsg, sizeof(syncMsg) -2) == 0){
         isSync = true;
         Rx_index = 0;
@@ -730,9 +753,9 @@ callback dataReceived(uint8_t *data, uint16_t size)
     char str[40];
     putsUart0("data received to app layer\n");
     /*data copy*/
-    for(i = (size - 1), j =0; i >= 0; i--,j++) {
-        buffer[j] = data[i];
-        snprintf(str,sizeof(str),"%u ",buffer[j]);
+    for(i = 0; i < size; i++) {
+        buffer[i] = data[i];
+        snprintf(str,sizeof(str),"%u ",buffer[i]);
         putsUart0(str);
     }
     putsUart0("\n");
@@ -768,7 +791,7 @@ void nrf24l0TxSync()
         char str[40];
         uint32_t mySlotTemp = getMySlot(readEeprom(NO_OF_DEV_IN_BRIDGE));
         snprintf(str, sizeof(str), "%"PRIu32"\n",mySlotTemp);
-        putsUart0(str);
+         putsUart0(str);
         mySlotTemp += GUARD_TIMER;
         stopTimer_ms(syncSlot_BR);
         startOneshotTimer_ms(syncSlot_BR, mySlotTemp);
@@ -1130,7 +1153,185 @@ bool isWebserverConnected(void)
     return webserverConnectionStatus;
 }
 
-int main()
+void initWireless(void)
+{
+    nrf24l0Init();
+    enableSync_BR();
+    initEeprom();
+}
+
+void processWireless(void)
+{
+     wirelessPacket *wp = (wirelessPacket *)buffer;      // allocate space for the wireless packet
+     // Bridge Functions //
+    nrf24l0TxSync();
+    TimerHandler_BR();
+    enableJoin_BR();
+
+    nrf24l0RxMsg(dataReceived);
+    if (dataReceivedFlag == true)
+    {
+        wp = (wirelessPacket*)buffer;
+        if (wp->packetType == PING_RESPONSE)
+        {
+            //Ping Response Function
+        }
+        else if (wp->packetType == DEVCAPS_RESPONSE)
+        {
+            deviceCaps *devCaps = (deviceCaps*)wp->data;
+            char * descrip;
+            char tempTopic[30] = {};
+            uint8_t i;
+            strncpy(tempTopic, longTopic, strlen(longTopic));
+
+            for(i = 0; i < devCaps->numOfCaps; i++)
+            {
+                strncpy(tempTopic + strlen(longTopic), devCaps->caps[i].capDescription, 5);
+                strcpy(subTopicQueue[i], tempTopic);
+                //topic[15] = devCaps->caps[i][0];
+            }
+            numOfSubCaps = devCaps->numOfCaps;
+            gf_mqtt_subscribe_caps = getMqttBrokerSocketIndex();
+            // Check if device is present in EEEPROM
+            MQTTBinding binding[3];
+
+            char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+
+            for(i = 0; i < 4; i++)
+            {
+                MQTTBinding *isBinding = mqtt_binding_table_get((MQTTBinding **)&binding, 3, tempCaps[i]);
+
+                if(isBinding != NULL)
+                {
+                    for(i = 0; i < devCaps->numOfCaps; i++)
+                    {
+                        binding[i].client_id[0] = 'd';
+                        binding[i].client_id[1] = 'e';
+                        binding[i].client_id[2] = 'v';
+                        binding[i].client_id[3] = 'i';
+                        binding[i].client_id[4] = 'c';
+                        binding[i].client_id[5] = 'e';
+                        binding[i].client_id[6] = devCaps->deviceNum + '0';
+
+                        description desc = devCaps->caps[i];
+                        capToDescription(desc.capDescription, descrip);
+
+                        strncpy(binding[i].topic, subTopicQueue[i], strlen(subTopicQueue[i]));
+                        strncpy(binding[i].devCaps, desc.capDescription, 5);
+                        strncpy(binding[i].description, descrip, strlen(descrip));
+                        binding[i].inOut = desc.inputOrOutput;
+                    }
+                    mqtt_binding_table_put((MQTTBinding **)&binding, devCaps->numOfCaps);
+                }
+            }
+        }
+        else if (wp->packetType == PUSH)
+        {
+            pushMessage *pushMsg = (pushMessage*)wp->data;
+            
+            // Using Table for long topic name (Not needed)
+            /*
+            MQTTBinding binding[3];
+            strncpy(binding[0].client_id, "device", 6);
+            // Get deviceNumber from timeslot number
+            // binding.client_id[0][6] = getTimeSlot();
+            strncpy(binding[0].devCaps, pushMsg->topicName, 5);
+            // Find full topic name
+            bool isDevicePresent = mqtt_binding_table_get(&binding);
+            */
+
+            char topicName[30] = {};
+            strncpy(topicName, longTopic, strlen(longTopic));
+            strncat(topicName, pushMsg->topicName, 5);
+            // TODO add message to publishMsgBuffer
+
+            if((pubWrPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE != pubRdPtr)
+            {
+                strcpy(pubMsgBuffer[pubWrPtr][PUB_MSG_BUFFER_TOPIC_INDEX], topicName);
+                strcpy(pubMsgBuffer[pubWrPtr++][PUB_MSG_BUFFER_MSG_INDEX], pushMsg->topicMessage);
+            }
+            gf_mqtt_device_pub = getMqttBrokerSocketIndex();
+
+        }
+        else if (wp->packetType == WEB_SERVER)
+        {
+            uint8_t timeSlot = 0;
+            setWebserverDeviceNumber(timeSlot);
+            webserverConnectionStatus = true;
+        }
+        else
+        {
+            putsUart0("Invalid Packet Type\n\n");
+        }
+        dataReceivedFlag = false;
+    }
+    //check for when Bridge can transmit
+    if(txTimeStatus)
+    {
+        if(sendJoinResponse_BR && downlinkSlotStart_br){
+            nrf24l0TxJoinResp_BR();
+            putsUart0("Join-RESP-BR\n");
+        }
+        if(downlinkSlotStart_br && appSendFlag){ // appsendflag is made true by proceshell or application handlers
+            //                nrf24l0TxMsg(data,sizeof(data), 2); // Bit 2 is set (0b00000010) which represents device number 2
+            //                appSendFlag = false;
+            //                putsUart0("DL sent\n");
+        }
+        if(fastackSlotStart_br && appSendFlag){
+            //                nrf24l0TxMsg(data,sizeof(data), 2);         // Bit 2 is set (0b00000010) which represents device number 2
+            //                putsUart0("FACK sent\n");
+            //                appSendFlag = false;
+        }
+        if (downlinkSlotStart_br && sendPingRequestFlag)
+        {
+            // cast as uint8_t
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2);  //wp just an example cast your wireless  packet struct
+            putsUart0("ping message sent.\n");          // ping message packet type set in process shell,
+            // packet type must equal to PING_REQUEST for the devices team
+            sendPingRequestFlag = false;
+
+        }
+        else if (downlinkSlotStart_br && sendDevCapsRequestFlag)
+        {
+            // convert deviceCaps struct to uint8_t
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // devCaps message packet type set in process shell,
+            // packet type must equal to DEVCAPS_REQUEST for the devices team
+            putsUart0("caps message sent.\n");
+            sendDevCapsRequestFlag = false;
+
+
+        }
+        else if (downlinkSlotStart_br && sendPushFlag)
+        {
+            // convert data struct to uint8_t
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
+            // packet type must equal to PUSH for the devices team
+            putsUart0("push message sent.\n");
+            sendPushFlag = false;
+
+        }
+        else if (sendPushFlag)
+        {
+            wp->packetType = PUSH; //always pushing our data
+            pushMessageDevNum pushData;
+            readPushMsgBuffer(&pushData);
+            pushMessage *wpPushMsg = wp->data;
+            // wpPushMsg = pushData.pushMsg;
+            strncpy(wpPushMsg->topicName, (pushData.pushMsg.topicName), 5);
+            strcpy(wpPushMsg->topicMessage, pushData.pushMsg.topicMessage);
+
+
+            // convert data struct to uint8_t
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), pushData.devNum); // push message packet type set in process shell,
+                                                        // packet type must equal to PUSH for the devices team
+            putsUart0("push message sent.\n");
+            sendPushFlag = false;
+
+        }
+    }
+}
+
+int main1()
 {
     initSystemClockTo40Mhz();
 
@@ -1150,7 +1351,7 @@ int main()
 
     while(true)
     {
-        processShell(wp);
+        processShell1(wp);
 
         // Bridge Functions //
         nrf24l0TxSync();
@@ -1362,110 +1563,3 @@ bool isPubMsgBufferEmpty(void)
 {
     return pubRdPtr == pubWrPtr;
 }
-
-/*
-int main()
-{
-    initSystemClockTo40Mhz();
-
-    initEeprom();
-    initUart0();
-    setUart0BaudRate(115200, 40e6);
-    nrf24l0Init();
-
-    putsUart0("Device Powered up \n");
-
-    uint8_t data[] = {1,2,3,4,5,6,100}; // Random data, magic number change later
-
-    //writeEeprom(NO_OF_DEV_IN_BRIDGE,0);                         // Number of devices is 1
-    //writeEeprom(DEV1_NO_START,0);
-    wirelessPacket *wp = (wirelessPacket *)buffer;      // allocate space for the wireless packet
-
-    while(true)
-    {
-        processShell(wp);
-
-        //Device functions
-        enableJoin_DEV();
-        //Common functions
-
-
-        nrf24l0RxMsg(dataReceived);
-
-        if (dataReceivedFlag == true)
-        {
-            //            wp = (wirelessPacket*)buffer;
-            if (wp->packetType == PING_REQUEST)
-            {
-                //send ping response packet
-                sendPingRequestFlag = true;
-                putsUart0("IT IS A PING PACKET!!\n");
-
-            }
-            else if (wp->packetType == DEVCAPS_REQUEST)
-            {
-                // send device response packet
-                // fill up the wireless packet, devCaps struct (fill description struct)
-                // use TX function to send data
-                putsUart0("IT IS A DEVCAPS_REQUEST!!\n");
-
-
-            }
-            else if (wp->packetType == PUSH)
-            {
-                // handle data
-                pushMessage *pmsg = (pushMessage*)wp->data;
-                putsUart0("IT IS A PUSH Message!!\n");
-            }
-            else
-            {
-                putsUart0("Invalid Packet Type\n\n");
-            }
-            dataReceivedFlag = false;
-        }
-
-        //check for slot no
-        if(txTimeStatus) // change later
-        {
-            if(nrfJoinEnabled && acessSlotStart_dev){
-                nrf24l0TxJoinReq_DEV();
-                setPinValue(JOIN_LED,1);
-            }
-            else if(uplinkSlot_dev){ // Appsend flag is controlled by application layer.
-
-                if (sendPingRequestFlag)
-                {
-                    uint8_t buffer[22];
-                    wirelessPacket* pingTest = (wirelessPacket*)buffer;
-                    pingTest->packetType = PING_RESPONSE;
-
-                    nrf24l0TxMsg((uint8_t*)pingTest, MAX_PACKCET_SIZE, getBridgeDevNoAddr_DEV()); //cast your own wireless struct
-                    if(msgAcked){
-                        sendPingRequestFlag = false;
-                    }
-                    putsUart0("Uplink Ping Response Sent\n");
-
-
-                }
-                else if (sendDevCapsRequestFlag)
-                {
-
-                    //nrf24l0TxMsg((uint8_t*)wp, MAX_PACKCET_SIZE, getBridgeDevNoAddr_DEV()); //cast your own devCap struct
-                    sendDevCapsRequestFlag = false;
-                    putsUart0("DevCaps Response Sent\n");
-
-                }
-                else if (sendPushFlag)
-                {
-                    // convert data struct to uint8_t
-                    nrf24l0TxMsg((uint8_t*)wp, MAX_PACKCET_SIZE, getBridgeDevNoAddr_DEV()); //cast your own pushMessage struct
-                    sendPushFlag = false;
-                    putsUart0("Push Msg Sent\n");
-
-                }
-                //                 appSendFlag = false;
-            }
-        }
-    }
-}
-*/
