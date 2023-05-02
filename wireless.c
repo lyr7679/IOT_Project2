@@ -52,6 +52,7 @@ uint8_t pubRdPtr = 0;
 bool webserverConnectionStatus = false;
 uint8_t webserverDeviceNumber = 0xFF;
 
+uint8_t shellDestinationDevNumber = 0;
 char longTopic[30] = "uta_iot/feeds/";
 //*******************************************************
 
@@ -751,14 +752,14 @@ callback dataReceived(uint8_t *data, uint16_t size)
     int i;
     uint8_t j = 0;
     char str[40];
-    putsUart0("data received to app layer\n");
+    // putsUart0("data received to app layer\n");
     /*data copy*/
     for(i = 0; i < size; i++) {
         buffer[i] = data[i];
-        snprintf(str,sizeof(str),"%u ",buffer[i]);
-        putsUart0(str);
+        // snprintf(str,sizeof(str),"%u ",buffer[i]);
+        // putsUart0(str);
     }
-    putsUart0("\n");
+    // putsUart0("\n");
 
     dataReceivedFlag = true;
 }
@@ -1244,7 +1245,7 @@ void processWireless(void)
             strncpy(topicName, longTopic, strlen(longTopic));
             strncat(topicName, pushMsg->topicName, 5);
             // TODO add message to publishMsgBuffer
-
+            // putsUart0(pushMsg->topicMessage);
             if((pubWrPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE != pubRdPtr)
             {
                 strcpy(pubMsgBuffer[pubWrPtr][PUB_MSG_BUFFER_TOPIC_INDEX], topicName);
@@ -1294,7 +1295,8 @@ void processWireless(void)
         else if (downlinkSlotStart_br && sendDevCapsRequestFlag)
         {
             // convert deviceCaps struct to uint8_t
-            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // devCaps message packet type set in process shell,
+            // 0xFFFF is multicast address to all devices
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 0xFFFF); // devCaps message packet type set in process shell,
             // packet type must equal to DEVCAPS_REQUEST for the devices team
             putsUart0("caps message sent.\n");
             sendDevCapsRequestFlag = false;
@@ -1477,7 +1479,7 @@ int main1()
             if (downlinkSlotStart_br && sendPingRequestFlag)
             {
                 // cast as uint8_t
-                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2);  //wp just an example cast your wireless  packet struct
+                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber);  //wp just an example cast your wireless  packet struct
                 putsUart0("ping message sent.\n");          // ping message packet type set in process shell,
                 // packet type must equal to PING_REQUEST for the devices team
                 sendPingRequestFlag = false;
@@ -1486,7 +1488,7 @@ int main1()
             else if (downlinkSlotStart_br && sendDevCapsRequestFlag)
             {
                 // convert deviceCaps struct to uint8_t
-                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // devCaps message packet type set in process shell,
+                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber); // devCaps message packet type set in process shell,
                 // packet type must equal to DEVCAPS_REQUEST for the devices team
                 putsUart0("caps message sent.\n");
                 sendDevCapsRequestFlag = false;
@@ -1496,7 +1498,7 @@ int main1()
             else if (downlinkSlotStart_br && sendPushFlag)
             {
                 // convert data struct to uint8_t
-                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
+                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber); // push message packet type set in process shell,
                 // packet type must equal to PUSH for the devices team
                 putsUart0("push message sent.\n");
                 sendPushFlag = false;
@@ -1509,7 +1511,7 @@ int main1()
                 readPushMsgBuffer(&pushData);
 
                 // convert data struct to uint8_t
-                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
+                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber); // push message packet type set in process shell,
                                                             // packet type must equal to PUSH for the devices team
                 putsUart0("push message sent.\n");
                 sendPushFlag = false;
@@ -1562,4 +1564,9 @@ bool readPubMsgBuffer(char pubMsg[1][2][30])
 bool isPubMsgBufferEmpty(void)
 {
     return pubRdPtr == pubWrPtr;
+}
+
+void setShellDestinationDevNumber(uint8_t devNum)
+{
+    shellDestinationDevNumber = devNum;
 }

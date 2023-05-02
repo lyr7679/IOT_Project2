@@ -83,6 +83,11 @@
 #define DEVCAPS_REQUEST     0x3
 #define DEVCAPS_RESPONSE    0x4
 #define WEB_SERVER          0x5
+
+#define INPUT '1'
+#define OUTPUT '0'
+#define INOUT '2'
+
 // Struct for wireless packet
 #define MAX_WIRELESS_PACKET_SIZE 22
 
@@ -308,6 +313,7 @@ bool isWebserverConnected(void);
 void setWebserverDeviceNumber(uint8_t devNum);
 uint8_t getWebserverDeviceNumber(void);
 
+void setShellDestinationDevNumber(uint8_t devNum);
 
 //----------------------------------------------------
 // Timer Internal functions

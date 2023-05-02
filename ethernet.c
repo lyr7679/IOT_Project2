@@ -563,17 +563,25 @@ void processShell()
             }
             if (strcmp(token, "ping") == 0)
             {
+                token = strtok(NULL, " ");
+                setShellDestinationDevNumber(atoi(token) & 0xFF);
                 sendWirelessPing();
                 
             }
             if (strcmp(token, "push") == 0)
             {
+                
+                token = strtok(NULL, " ");
+                setShellDestinationDevNumber(atoi(token) & 0xFF);
                 sendDevPush();
                 
             }
 
             if (strcmp(token, "devCaps") == 0)
             {
+                
+                // token = strtok(NULL, " ");
+                // setShellDestinationDevNumber(atoi(token) & 0xFF);
                 sendDevCap();
             }
             if (strcmp(token, "reset") == 0)
