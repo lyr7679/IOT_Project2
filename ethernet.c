@@ -89,10 +89,8 @@
 
 //adafruit credentials
 #define IO_USRNAME "uta_iot"
-#define IO_KEY "aio_KmSy234QQLLYKPCTaL2d8ZZJA1oh"
+#define IO_KEY "aio_vpTL146NJB4ytPRsj9Vh43aRnOHY"
 
-#define INPUT 1
-#define OUTPUT 0
 
 
 //-----------------------------------------------------------------------------
@@ -555,10 +553,10 @@ void processShell()
                     putsUart0(bufferTemp);
                     address += 1u;
                     temp = readEeprom(address);
-                    snprintf(bufferTemp, 80, "\t\t\t%d.%d.%d.%d\n", (temp & 0xFF000000) >> 24,
+                    snprintf(bufferTemp, 80, "\t\t\t\t%d.%d.%d.%d\n", (temp & 0xFF000000) >> 24,
                     (temp & 0x00FF0000) >> 16, (temp & 0x0000FF00) >> 8, (temp & 0x000000FF));
                     putsUart0(bufferTemp);
-                    address += 4u;
+                    address += 6u;
                 }
             }
             if (strcmp(token, "ping") == 0)
@@ -580,8 +578,8 @@ void processShell()
             if (strcmp(token, "devCaps") == 0)
             {
                 
-                // token = strtok(NULL, " ");
-                // setShellDestinationDevNumber(atoi(token) & 0xFF);
+                token = strtok(NULL, " ");
+                setShellDestinationDevNumber(atoi(token) & 0xFF);
                 sendDevCap();
             }
             if (strcmp(token, "reset") == 0)
@@ -598,27 +596,32 @@ void processShell()
 
             if(strcmp(token, "showCaps") == 0)
             {
-                MQTTBinding binding[3];
+                MQTTBinding binding1 = {0};
+                MQTTBinding binding2 = {0};
+                MQTTBinding binding3  = {0};
+                MQTTBinding *binding[] = {&binding1, &binding2, &binding3};
+                //MQTTBinding binding[3];
                 char bindingTemp[30];
-                char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+                char tempCaps[4][6] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
                 uint16_t j = 0;
                 char * inOrOut;
-                snprintf(bufferTemp, 80, "%s", "Device Number\tType\tFunction\tUnits\n");
+                snprintf(bufferTemp, 80, "%s", "Device Number\t\tType\t\tFunction\tUnits\n");
+                putsUart0(bufferTemp);
 
                 for(i = 0; i < 4; i++)
                 {
-                    MQTTBinding *isBinding = mqtt_binding_table_get((MQTTBinding **)&binding, 3, tempCaps[i]);
-
+                    MQTTBinding *isBinding = mqtt_binding_table_get(binding, 3, tempCaps[i]);
                     if(isBinding != NULL)
                     {
-                        for(j = 0; j < binding[0].numOfCaps; j++)
+                        for(j = 0; j < binding[0]->numOfCaps - '0'; j++)
                         {
-                            if(binding[j].inOut == INPUT)
+                            if(binding[j]->inOut == INPUT)
                                 strncpy(inOrOut, "input", 5);
-                            else if(binding[j].inOut == OUTPUT)
+                            else if(binding[j]->inOut == OUTPUT)
                                 strncpy(inOrOut, "output", 6);
-                            strcpy(bindingTemp, strtok(binding[j].description, " "));
-                            snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j].client_id[6], inOrOut, bindingTemp, strtok(NULL, " "));
+                            strcpy(bindingTemp, strtok(binding[j]->description, " "));
+                            snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j]->client_id[6], inOrOut, bindingTemp, strtok(NULL, " "));
+                            putsUart0(bufferTemp);
                         }
                     }
                 }
@@ -626,12 +629,22 @@ void processShell()
                 if(isWebserverConnected())
                 {
                     snprintf(bufferTemp, 80, "%d\tRefer to the Web Server\n", getWebserverDeviceNumber());
+                    putsUart0(bufferTemp);
                 }
 
             }
             if (strcmp(token, "ifconfig") == 0)
             {
                 displayConnectionInfo();
+            }
+            if (strcmp(token, "wipe") == 0)
+            {
+                uint16_t x;
+                for (x = 0; i < 65535; x++)
+                {
+                    i2cEepromWrite(0x50, x, 0xFF);
+                    waitMicrosecond(5000);
+                }
             }
             if (strcmp(token, "reboot") == 0)
             {
@@ -1323,6 +1336,7 @@ int main(void)
     // Setup UART0
     initUart0();
     setUart0BaudRate(115200, 40e6);
+    initI2c0();
     initWireless();
     // Init timer
     initTimer();
@@ -1415,10 +1429,10 @@ int main(void)
                     // Handle ICMP ping response
                     if(isPingResponse(data))
                     {
-                        putsUart0("Time = ");
-                        sprintf(str, "%u""ms", getUptime() - pingTime);
-                        putsUart0(str);
-                        putcUart0('\n');
+                        // putsUart0("Time = ");
+                        // sprintf(str, "%u""ms", getUptime() - pingTime);
+                        // putsUart0(str);
+                        // putcUart0('\n');
                         deleteSocket(&(sockets[gf_rx_ping]));
                         gf_rx_ping = 0;
                     }
@@ -1516,7 +1530,7 @@ int main(void)
                                                         putsUart0("Unsubscribed from ");
                                                         putsUart0(topics[gf_mqtt_rx_unsuback].name);
                                                         putcUart0('\n');
-                                                        removeTopic(gf_mqtt_rx_unsuback, topics);
+                                                        // removeTopic(gf_mqtt_rx_unsuback, topics);
                                                         gf_mqtt_rx_unsuback = 0;
                                                     }
                                                     break;
@@ -1526,7 +1540,7 @@ int main(void)
                                                     char shortTopicName[5];
                                                     // 0012 uta_iot/feed/mtrsp
                                                     // 0 1  0123456789ABC
-                                                    strncpy(shortTopicName, (char *)mqttData[2 + topicLength - 5], 5);
+                                                    strncpy(shortTopicName, (char *)&mqttData[2 + topicLength - 5], 5);
                                                     uint16_t msgLength = getMqttMessageLength(tcpData);
                                                     mqttMessage = getMqttMessage(tcpData);
                                                     pushMessage pshMsg;
@@ -1534,7 +1548,7 @@ int main(void)
                                                     strncpy(pshMsg.topicMessage, (char *)mqttMessage, msgLength);
 
                                                     MQTTBinding binding[3];
-//                                                    strncpy(binding[0].devCaps, shortTopicName, 5);
+                                                //    strncpy(binding[0].devCaps, shortTopicName, 5);
                                                     MQTTBinding *isDevicePresent = mqtt_binding_table_get((MQTTBinding **)&binding, 3, pshMsg.topicName);
 
                                                     if(isDevicePresent != NULL)

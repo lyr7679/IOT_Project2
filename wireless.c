@@ -621,10 +621,10 @@ void parsenrf24l01DataPacket(){
     }
     else{
 
-        if(packetLength >32){ // Check for continuos transmission of data and we dont check for the payload length in subsequent packets
-            putsUart0("More than 32 bytes HANDLE LATER\n");
-        }
-        else if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
+//        if(packetLength >32){ // Check for continuos transmission of data and we dont check for the payload length in subsequent packets
+//            putsUart0("More than 32 bytes HANDLE LATER\n");
+//        }
+        if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
             deviceNum = eepromGetDevInfo_DEV();                 //Get device number stored in EEPROm. For already stored devices
 
             if(!nrfJoinEnabled && !isBridge) { // check whether myDevice got an ACK
@@ -752,14 +752,14 @@ callback dataReceived(uint8_t *data, uint16_t size)
     int i;
     uint8_t j = 0;
     char str[40];
-    // putsUart0("data received to app layer\n");
+    putsUart0("data received to app layer\n");
     /*data copy*/
     for(i = 0; i < size; i++) {
         buffer[i] = data[i];
-        // snprintf(str,sizeof(str),"%u ",buffer[i]);
-        // putsUart0(str);
+         snprintf(str,sizeof(str),"%u ",buffer[i]);
+         putsUart0(str);
     }
-    // putsUart0("\n");
+    putsUart0("\n");
 
     dataReceivedFlag = true;
 }
@@ -1114,7 +1114,7 @@ uint32_t getBridgeDevNoAddr_DEV(){
     return temp;
 }
 
-void capToDescription(char * devCap, char * description)
+void capToDescription(char * devCap, char *description)
 {
     if(strcmp(devCap, "MTRSP") == 0)
         strcpy(description, "Motor Speed Fast Medium Slow");
@@ -1180,49 +1180,55 @@ void processWireless(void)
         else if (wp->packetType == DEVCAPS_RESPONSE)
         {
             deviceCaps *devCaps = (deviceCaps*)wp->data;
-            char * descrip;
+            char descrip[50] = {};
             char tempTopic[30] = {};
             uint8_t i;
+            uint8_t j;
             strncpy(tempTopic, longTopic, strlen(longTopic));
 
-            for(i = 0; i < devCaps->numOfCaps; i++)
+            for(i = 0; i < devCaps->numOfCaps - '0'; i++)
             {
                 strncpy(tempTopic + strlen(longTopic), devCaps->caps[i].capDescription, 5);
                 strcpy(subTopicQueue[i], tempTopic);
                 //topic[15] = devCaps->caps[i][0];
             }
-            numOfSubCaps = devCaps->numOfCaps;
+            numOfSubCaps = devCaps->numOfCaps - '0';
             gf_mqtt_subscribe_caps = getMqttBrokerSocketIndex();
             // Check if device is present in EEEPROM
-            MQTTBinding binding[3];
+            MQTTBinding binding1 = {0};
+            MQTTBinding binding2 = {0};
+            MQTTBinding binding3  = {0};
+            MQTTBinding *binding[] = {&binding1, &binding2, &binding3};
 
             char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+            char temp[30] = {0};
 
             for(i = 0; i < 4; i++)
             {
-                MQTTBinding *isBinding = mqtt_binding_table_get((MQTTBinding **)&binding, 3, tempCaps[i]);
+                MQTTBinding *isBinding = mqtt_binding_table_get(binding, 3, tempCaps[i]);
+//                strncpy(devCaps->caps[0].capDescription, )
 
-                if(isBinding != NULL)
+                if(isBinding == NULL && strcmp(tempCaps[i], devCaps->caps[0].capDescription) == 0)
                 {
-                    for(i = 0; i < devCaps->numOfCaps; i++)
+                    for(j = 0; j < devCaps->numOfCaps - '0'; j++)
                     {
-                        binding[i].client_id[0] = 'd';
-                        binding[i].client_id[1] = 'e';
-                        binding[i].client_id[2] = 'v';
-                        binding[i].client_id[3] = 'i';
-                        binding[i].client_id[4] = 'c';
-                        binding[i].client_id[5] = 'e';
-                        binding[i].client_id[6] = devCaps->deviceNum + '0';
+                        binding[j]->client_id[0] = 'd';
+                        binding[j]->client_id[1] = 'e';
+                        binding[j]->client_id[2] = 'v';
+                        binding[j]->client_id[3] = 'i';
+                        binding[j]->client_id[4] = 'c';
+                        binding[j]->client_id[5] = 'e';
+                        binding[j]->client_id[6] = devCaps->deviceNum;
 
-                        description desc = devCaps->caps[i];
+                        description desc = devCaps->caps[j];
                         capToDescription(desc.capDescription, descrip);
 
-                        strncpy(binding[i].topic, subTopicQueue[i], strlen(subTopicQueue[i]));
-                        strncpy(binding[i].devCaps, desc.capDescription, 5);
-                        strncpy(binding[i].description, descrip, strlen(descrip));
-                        binding[i].inOut = desc.inputOrOutput;
+                        strncpy(binding[j]->topic, subTopicQueue[j], strlen(subTopicQueue[j]));
+                        strncpy(binding[j]->devCaps, desc.capDescription, 5);
+                        strncpy(binding[j]->description, descrip, strlen(descrip));
+                        binding[j]->inOut = desc.inputOrOutput;
                     }
-                    mqtt_binding_table_put((MQTTBinding **)&binding, devCaps->numOfCaps);
+                    mqtt_binding_table_put(binding, devCaps->numOfCaps - '0');
                 }
             }
         }
@@ -1245,7 +1251,8 @@ void processWireless(void)
             strncpy(topicName, longTopic, strlen(longTopic));
             strncat(topicName, pushMsg->topicName, 5);
             // TODO add message to publishMsgBuffer
-            // putsUart0(pushMsg->topicMessage);
+            putsUart0(pushMsg->topicMessage);
+            putsUart0("\n");
             if((pubWrPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE != pubRdPtr)
             {
                 strcpy(pubMsgBuffer[pubWrPtr][PUB_MSG_BUFFER_TOPIC_INDEX], topicName);
@@ -1286,7 +1293,7 @@ void processWireless(void)
         if (downlinkSlotStart_br && sendPingRequestFlag)
         {
             // cast as uint8_t
-            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2);  //wp just an example cast your wireless  packet struct
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber);  //wp just an example cast your wireless  packet struct
             putsUart0("ping message sent.\n");          // ping message packet type set in process shell,
             // packet type must equal to PING_REQUEST for the devices team
             sendPingRequestFlag = false;
@@ -1296,7 +1303,7 @@ void processWireless(void)
         {
             // convert deviceCaps struct to uint8_t
             // 0xFFFF is multicast address to all devices
-            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 0xFFFF); // devCaps message packet type set in process shell,
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber); // devCaps message packet type set in process shell,
             // packet type must equal to DEVCAPS_REQUEST for the devices team
             putsUart0("caps message sent.\n");
             sendDevCapsRequestFlag = false;
@@ -1305,9 +1312,18 @@ void processWireless(void)
         }
         else if (downlinkSlotStart_br && sendPushFlag)
         {
+            wp->packetType = PUSH; //always pushing our data
+            pushMessageDevNum pushData;
+            readPushMsgBuffer(&pushData);
+            pushMessage *wpPushMsg = wp->data;
+            // wpPushMsg = pushData.pushMsg;
+            strncpy(wpPushMsg->topicName, (pushData.pushMsg.topicName), 5);
+            strcpy(wpPushMsg->topicMessage, pushData.pushMsg.topicMessage);
+
+
             // convert data struct to uint8_t
-            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
-            // packet type must equal to PUSH for the devices team
+            nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), pushData.devNum); // push message packet type set in process shell,
+                                                        // packet type must equal to PUSH for the devices team
             putsUart0("push message sent.\n");
             sendPushFlag = false;
 
@@ -1375,7 +1391,9 @@ int main1()
                 deviceCaps *devCaps = (deviceCaps*)wp->data;
                 char * descrip;
                 char tempTopic[30] = {};
+                char bufferTemp[80];
                 uint8_t i;
+                char * inOrOut;
                 strncpy(tempTopic, longTopic, strlen(longTopic));
 
                 for(i = 0; i < devCaps->numOfCaps; i++)
@@ -1390,6 +1408,19 @@ int main1()
                 MQTTBinding binding[3];
 
                 char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+
+                // snprintf(bufferTemp, 80, "%s", "Device Number\t\tType\t\tFunction\tUnits\n");
+                // putsUart0(bufferTemp);
+
+                // for(i = 0; i < devCaps->numOfCaps; i++)
+                // {
+                //     if(devCaps->caps[i]->inOut == INPUT)
+                //             strncpy(inOrOut, "input", 5);
+                //     else if(binding[j]->inOut == OUTPUT)
+                //         strncpy(inOrOut, "output", 6);
+                // }
+                            
+                // snprintf(bufferTemp, 8-, "%c\t")
 
                 for(i = 0; i < 4; i++)
                 {

@@ -18,14 +18,27 @@
 // Subroutines
 //-----------------------------------------------------------------------------
 
-uint32_t fnv1_hash(const char *str)
-{
+//uint32_t fnv1_hash(const char *str)
+//{
+//    uint32_t hash = FNV_OFFSET_BASIS;
+//    const char *p;
+//    for (p = str; *p; p++)
+//    {
+//        hash *= FNV_PRIME;
+//        hash ^= (uint32_t)(*p);
+//    }
+//    return hash % HASH_TABLE_SIZE;
+//}
+
+uint32_t fnv1_hash(const char *str) {
     uint32_t hash = FNV_OFFSET_BASIS;
     const char *p;
-    for (p = str; *p; p++)
+    uint8_t count = 0;
+    for (p = str; *p && count < 5; p++)
     {
         hash *= FNV_PRIME;
         hash ^= (uint32_t)(*p);
+        count++;
     }
     return hash % HASH_TABLE_SIZE;
 }
@@ -55,6 +68,9 @@ void mqtt_binding_table_put(MQTTBinding **bindings, uint8_t bindings_count)
     }
 }
 
+
+
+//
 MQTTBinding *mqtt_binding_table_get(MQTTBinding **bindings, uint8_t bindings_count, const char *devCaps)
 {
     uint8_t i;
@@ -62,18 +78,18 @@ MQTTBinding *mqtt_binding_table_get(MQTTBinding **bindings, uint8_t bindings_cou
 
     for (i = 0; i < bindings_count; i++)
     {
+        // Read the binding from EEPROM
+        uint32_t index = fnv1_hash(bindings[i]->devCaps);
+        uint16_t entry_addr = (uint16_t)(index * sizeof(MQTTBinding));
+        uint8_t *binding_ptr = (uint8_t *)bindings[i];
+
+        for (j = 0; j < sizeof(MQTTBinding); j++)
+        {
+            binding_ptr[j] = i2cEepromRead(EEPROM_ADDRESS, entry_addr + j);
+        }
+
         if (strncmp(bindings[i]->devCaps, devCaps, sizeof(bindings[i]->devCaps)) == 0)
         {
-            // Read the binding from EEPROM
-            uint32_t index = fnv1_hash(bindings[i]->devCaps);
-            uint16_t entry_addr = (uint16_t)(index * sizeof(MQTTBinding));
-            uint8_t *binding_ptr = (uint8_t *)bindings[i];
-
-            for (j = 0; j < sizeof(MQTTBinding); j++)
-            {
-                binding_ptr[j] = i2cEepromRead(EEPROM_ADDRESS, entry_addr + j);
-            }
-
             // Return the found binding
             return bindings[i];
         }
