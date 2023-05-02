@@ -605,12 +605,12 @@ void parsenrf24l01DataPacket(){
         int i;
         uint8_t j = 0;
         char str[40];
-        putsUart0("debug Rxpacket data: \n");
-        for(i = 0; i<payloadlength; i++) {
-            snprintf(str,sizeof(str),"%u ",Rxpacket[i]);
-            putsUart0(str);
-        }
-        putsUart0("\n");
+        // putsUart0("debug Rxpacket data: \n");
+        // for(i = 0; i<payloadlength; i++) {
+        //     snprintf(str,sizeof(str),"%u ",Rxpacket[i]);
+        //     putsUart0(str);
+        // }
+        // putsUart0("\n");
     }
 
     // check sync. Last byte for frame count1 is omitted
@@ -752,14 +752,14 @@ callback dataReceived(uint8_t *data, uint16_t size)
     int i;
     uint8_t j = 0;
     char str[40];
-    putsUart0("data received to app layer\n");
-    /*data copy*/
+    // putsUart0("data received to app layer\n");
+    // /*data copy*/
     for(i = 0; i < size; i++) {
         buffer[i] = data[i];
          snprintf(str,sizeof(str),"%u ",buffer[i]);
-         putsUart0(str);
+        //  putsUart0(str);
     }
-    putsUart0("\n");
+    // putsUart0("\n");
 
     dataReceivedFlag = true;
 }
@@ -792,7 +792,7 @@ void nrf24l0TxSync()
         char str[40];
         uint32_t mySlotTemp = getMySlot(readEeprom(NO_OF_DEV_IN_BRIDGE));
         snprintf(str, sizeof(str), "%"PRIu32"\n",mySlotTemp);
-         putsUart0(str);
+        //  putsUart0(str);
         mySlotTemp += GUARD_TIMER;
         stopTimer_ms(syncSlot_BR);
         startOneshotTimer_ms(syncSlot_BR, mySlotTemp);
@@ -1538,11 +1538,16 @@ int main1()
             else if (sendPushFlag)
             {
                 wp->packetType = PUSH; //always pushing our data
+                // pushData.pushMessage
                 pushMessageDevNum pushData;
                 readPushMsgBuffer(&pushData);
+                pushMessage *wpPushMessage = (pushMessage *)wp->data;
+                
+                strncpy(wpPushMessage->topicName, pushData.pushMsg.topicName, 5);
 
+                strcpy(wpPushMessage->topicMessage, pushData.pushMsg.topicMessage);
                 // convert data struct to uint8_t
-                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), shellDestinationDevNumber); // push message packet type set in process shell,
+                nrf24l0TxMsg((uint8_t*)wp, MAX_PACKCET_SIZE, pushData.devNum); // push message packet type set in process shell,
                                                             // packet type must equal to PUSH for the devices team
                 putsUart0("push message sent.\n");
                 sendPushFlag = false;

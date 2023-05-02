@@ -89,7 +89,7 @@
 
 //adafruit credentials
 #define IO_USRNAME "uta_iot"
-#define IO_KEY "aio_vpTL146NJB4ytPRsj9Vh43aRnOHY"
+#define IO_KEY ""
 
 
 
@@ -518,7 +518,7 @@ void processShell()
 {
     bool end;
     char c;
-    uint8_t i;
+    uint8_t i, j;
     uint8_t ip[IP_ADD_LENGTH];
     uint32_t* p32;
     char bufferTemp[80];
@@ -545,18 +545,25 @@ void processShell()
                 snprintf(bufferTemp, 80, "%s", "\nDevice Number\t\tDevice MAC Address\n");
                 putsUart0(bufferTemp);
                 uint32_t temp = 0;
-                uint16_t address = 14u;
+                uint16_t address = 13u;
                 for(i = 0; i < readEeprom(10u); i++)
                 {
-                    temp = (readEeprom(address) & 0x0F000000) >> 24;
-                    snprintf(bufferTemp, 80, "%d", temp);
+                    address += 1u;
+                    //temp = (readEeprom(address) & 0x0F000000) >> 24;
+                    temp = readEeprom(address);
+                    snprintf(bufferTemp, 80, "%d\t\t\t\t", 1 << temp);
                     putsUart0(bufferTemp);
+                    for(j = 0; j < 5; j++)
+                    {
+                        address += 1u;
+                        temp = readEeprom(address);
+                        snprintf(bufferTemp, 80, "%d:", temp);
+                        putsUart0(bufferTemp);
+                    }
                     address += 1u;
                     temp = readEeprom(address);
-                    snprintf(bufferTemp, 80, "\t\t\t\t%d.%d.%d.%d\n", (temp & 0xFF000000) >> 24,
-                    (temp & 0x00FF0000) >> 16, (temp & 0x0000FF00) >> 8, (temp & 0x000000FF));
+                    snprintf(bufferTemp, 80, "%d\n", temp);
                     putsUart0(bufferTemp);
-                    address += 6u;
                 }
             }
             if (strcmp(token, "ping") == 0)
