@@ -13,6 +13,9 @@
 #include "eeprom.h"
 #include "uart0.h"
 #include "wireless.h"
+#include "hashTable.h"
+#include "mqtt.h" // Added for getMqttBrokerAddress and setMqttBrokerAddress
+#include "i2c0.h"
 
 bool isBridge = false;
 bool nrfSyncEnabled = false;
@@ -35,6 +38,22 @@ uint8_t Rxpacket[DATA_MAX_SIZE] = {0};
 uint16_t Rx_index =0;                               // read index
 uint16_t Rx_wrIndex =0;                             // write index
 uint8_t payloadlength =32;
+
+
+//*************Bridge Data structures***************
+pushMessageDevNum pushMsgBuffer[MAX_PSH_MSG_BUFFER_SIZE];
+uint8_t pushWrPtr = 0;
+uint8_t pushRdPtr = 0;
+
+char pubMsgBuffer[MAX_PUB_MSG_BUFFER_SIZE][2][30]; // each topic/msg can be 30 characters long with 2 arguments (topic,msg)
+uint8_t pubWrPtr = 0;
+uint8_t pubRdPtr = 0;
+
+bool webserverConnectionStatus = false;
+uint8_t webserverDeviceNumber = 0xFF;
+
+char longTopic[30] = "uta_iot/feeds/";
+//*******************************************************
 
 //*************CTX RX Structs and flags***************
 uint8_t buffer[MAX_WIRELESS_PACKET_SIZE] = {0};
@@ -1071,6 +1090,45 @@ uint32_t getBridgeDevNoAddr_DEV(){
     return temp;
 }
 
+void capToDescription(char * devCap, char * description)
+{
+    if(strcmp(devCap, "MTRSP") == 0)
+        strcpy(description, "Motor Speed Fast Medium Slow");
+    
+    else if(strcmp(devCap, "MTRDR") == 0)
+        strcpy(description, "Motor Direction Forward Reverse"); 
+
+    else if(strcmp(devCap, "MTRPW") == 0)
+        strcpy(description, "Motor Power Start Stop");  
+
+    else if(strcmp(devCap, "TEMPF") == 0)
+        strcpy(description, "Temperature Degrees(Farenheit)"); 
+
+    else if(strcmp(devCap, "BARCO") == 0)
+        strcpy(description, "Barcode Code");  
+
+    else if(strcmp(devCap, "DISTC") == 0)
+        strcpy(description, "Distance_Sensor Count");   
+
+    else if(strcmp(devCap, "DISTO") == 0)
+        strcpy(description, "Distance_Sensor Detect");
+}
+
+
+void setWebserverDeviceNumber(uint8_t devNum)
+{
+     webserverDeviceNumber = devNum;
+}
+
+uint8_t getWebserverDeviceNumber(void)
+{
+     return webserverDeviceNumber;
+}
+
+bool isWebserverConnected(void)
+{
+    return webserverConnectionStatus;
+}
 
 int main()
 {
@@ -1112,10 +1170,85 @@ int main()
             else if (wp->packetType == DEVCAPS_RESPONSE)
             {
                 deviceCaps *devCaps = (deviceCaps*)wp->data;
+                char * descrip;
+                char tempTopic[30] = {};
+                uint8_t i;
+                strncpy(tempTopic, longTopic, strlen(longTopic));
+
+                for(i = 0; i < devCaps->numOfCaps; i++)
+                {
+                    strncpy(tempTopic + strlen(longTopic), devCaps->caps[i].capDescription, 5);
+                    strcpy(subTopicQueue[i], tempTopic);
+                    //topic[15] = devCaps->caps[i][0];
+                }
+                numOfSubCaps = devCaps->numOfCaps;
+                gf_mqtt_subscribe_caps = getMqttBrokerSocketIndex();
+                // Check if device is present in EEEPROM
+                MQTTBinding binding[3];
+
+                char tempCaps[4][5] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+
+                for(i = 0; i < 4; i++)
+                {
+                    MQTTBinding *isBinding = mqtt_binding_table_get((MQTTBinding **)&binding, 3, tempCaps[i]);
+
+                    if(isBinding != NULL)
+                    {
+                        for(i = 0; i < devCaps->numOfCaps; i++)
+                        {
+                            binding[i].client_id[0] = 'd';
+                            binding[i].client_id[1] = 'e';
+                            binding[i].client_id[2] = 'v';
+                            binding[i].client_id[3] = 'i';
+                            binding[i].client_id[4] = 'c';
+                            binding[i].client_id[5] = 'e';
+                            binding[i].client_id[6] = devCaps->deviceNum + '0';
+
+                            description desc = devCaps->caps[i];
+                            capToDescription(desc.capDescription, descrip);
+
+                            strncpy(binding[i].topic, subTopicQueue[i], strlen(subTopicQueue[i]));
+                            strncpy(binding[i].devCaps, desc.capDescription, 5);
+                            strncpy(binding[i].description, descrip, strlen(descrip));
+                            binding[i].inOut = desc.inputOrOutput;
+                        }
+                        mqtt_binding_table_put((MQTTBinding **)&binding, devCaps->numOfCaps);
+                    }
+                }
             }
             else if (wp->packetType == PUSH)
             {
-                pushMessage *pmsg = (pushMessage*)wp->data;
+                pushMessage *pushMsg = (pushMessage*)wp->data;
+                
+                // Using Table for long topic name (Not needed)
+                /*
+                MQTTBinding binding[3];
+                strncpy(binding[0].client_id, "device", 6);
+                // Get deviceNumber from timeslot number
+                // binding.client_id[0][6] = getTimeSlot();
+                strncpy(binding[0].devCaps, pushMsg->topicName, 5);
+                // Find full topic name
+                bool isDevicePresent = mqtt_binding_table_get(&binding);
+                */
+
+                char topicName[30] = {};
+                strncpy(topicName, longTopic, strlen(longTopic));
+                strncat(topicName, pushMsg->topicName, 5);
+                // TODO add message to publishMsgBuffer
+
+                if((pubWrPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE != pubRdPtr)
+                {
+                    strcpy(pubMsgBuffer[pubWrPtr][PUB_MSG_BUFFER_TOPIC_INDEX], topicName);
+                    strcpy(pubMsgBuffer[pubWrPtr++][PUB_MSG_BUFFER_MSG_INDEX], pushMsg->topicMessage);
+                }
+                gf_mqtt_device_pub = getMqttBrokerSocketIndex();
+
+            }
+            else if (wp->packetType == WEB_SERVER)
+            {
+                uint8_t timeSlot = 0;
+                setWebserverDeviceNumber(timeSlot);
+                webserverConnectionStatus = true;
             }
             else
             {
@@ -1168,10 +1301,67 @@ int main()
                 sendPushFlag = false;
 
             }
+            else if (sendPushFlag)
+            {
+                wp->packetType = PUSH; //always pushing our data
+                pushMessageDevNum pushData;
+                readPushMsgBuffer(&pushData);
+
+                // convert data struct to uint8_t
+                nrf24l0TxMsg((uint8_t*)wp, sizeof(wp), 2); // push message packet type set in process shell,
+                                                            // packet type must equal to PUSH for the devices team
+                putsUart0("push message sent.\n");
+                sendPushFlag = false;
+
+            }
         }
     }
 }
 
+bool queuePushMsg(pushMessage *pushMsg, uint8_t devNum)
+{
+    if((pushWrPtr + 1) % MAX_PSH_MSG_BUFFER_SIZE == pushRdPtr)
+        return false;
+    
+    
+    strncpy(pushMsgBuffer[pushWrPtr].pushMsg.topicName, pushMsg->topicName, 5);
+    strcpy(pushMsgBuffer[pushWrPtr].pushMsg.topicMessage, pushMsg->topicMessage);
+    pushMsgBuffer[pushWrPtr].devNum = devNum;
+    
+    pushWrPtr = (pushWrPtr + 1) % MAX_PSH_MSG_BUFFER_SIZE;
+    sendPushFlag = true;
+    return true;
+}
+bool readPushMsgBuffer(pushMessageDevNum *pushMsgDevNum)
+{
+    if(pushRdPtr == pushWrPtr)
+        return false;
+    
+    pushMessageDevNum tempMsgBuffer = pushMsgBuffer[pushRdPtr];
+    strncpy(pushMsgDevNum->pushMsg.topicName, tempMsgBuffer.pushMsg.topicName, 5);
+    strcpy(pushMsgDevNum->pushMsg.topicMessage, tempMsgBuffer.pushMsg.topicMessage);
+    pushMsgDevNum->devNum = tempMsgBuffer.devNum;
+
+    pushRdPtr = (pushRdPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE;
+    return true;
+}
+bool readPubMsgBuffer(char pubMsg[1][2][30])
+{
+    if(pubRdPtr == pubWrPtr)
+        return false;
+    
+
+    strcpy(pubMsg[0][PUB_MSG_BUFFER_TOPIC_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_TOPIC_INDEX]);
+    strcpy(pubMsg[0][PUB_MSG_BUFFER_MSG_INDEX], pubMsgBuffer[pubRdPtr][PUB_MSG_BUFFER_MSG_INDEX]);
+    pubRdPtr = (pubRdPtr + 1) % MAX_PUB_MSG_BUFFER_SIZE;
+    return true;
+
+
+}
+bool isPubMsgBufferEmpty(void)
+{
+    return pubRdPtr == pubWrPtr;
+}
 
 /*
 int main()

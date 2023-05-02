@@ -117,12 +117,28 @@ typedef struct _pushMessage
     char data[16];                  // 19 bytes
 } pushMessage;
 
+// Used for Push Message buffer
+typedef struct _pushMessageDevNum
+{
+    pushMessage pushMsg;
+    uint8_t devNum;
+} pushMessageDevNum;
 
 
 //******************************************************
 
 //Extern variables
+uint8_t gf_mqtt_subscribe_caps;
+uint8_t numOfSubCaps;
+uint8_t gf_mqtt_device_pub;
 
+char subTopicQueue[3][30];
+
+#define MAX_PUB_MSG_BUFFER_SIZE 10
+#define MAX_PSH_MSG_BUFFER_SIZE MAX_PUB_MSG_BUFFER_SIZE
+
+#define PUB_MSG_BUFFER_TOPIC_INDEX 0
+#define PUB_MSG_BUFFER_MSG_INDEX 1
 //-------------------------------------------------------
 // Declare external variables for nrfSyncEnabled, nrfJoinEnabled and nrfJoinEnabled_BR
 extern bool isBridge ;
@@ -263,6 +279,26 @@ void enableSync_BR();
 
 // Allocate a device num for new device OR Get device number if already available
 uint8_t eepromSetGetDevInfo_BR(uint8_t *data);
+
+// Adds a new pushMessage to the pushMessage buffer to be sent to the various devices
+bool queuePushMsg(pushMessage *pushMsg, uint8_t devNum);
+
+// Reads pubMsg from publishMsgBuffer returns False if buffer is empty
+bool readPushMsgBuffer(pushMessageDevNum *pushMsgDevNum);
+
+// Reads pubMsg from publishMsgBuffer returns False if buffer is empty
+bool readPubMsgBuffer(char pubMsg[1][2][30]);
+
+
+// Returns true if buffer is empty
+bool isPubMsgBufferEmpty(void);
+
+// Returns true if the webserver is connected
+bool isWebserverConnected(void);
+
+// sets if webserver is connected
+void setWebserverDeviceNumber(uint8_t devNum);
+uint8_t getWebserverDeviceNumber(void);
 
 
 //----------------------------------------------------
