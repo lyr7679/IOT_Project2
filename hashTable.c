@@ -79,7 +79,7 @@ MQTTBinding *mqtt_binding_table_get(MQTTBinding **bindings, uint8_t bindings_cou
     for (i = 0; i < bindings_count; i++)
     {
         // Read the binding from EEPROM
-        uint32_t index = fnv1_hash(bindings[i]->devCaps);
+        uint32_t index = fnv1_hash(devCaps);
         uint16_t entry_addr = (uint16_t)(index * sizeof(MQTTBinding));
         uint8_t *binding_ptr = (uint8_t *)bindings[i];
 

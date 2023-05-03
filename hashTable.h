@@ -36,10 +36,11 @@
 typedef struct {
     char client_id[16];         // dev0
     char topic[30];             // uta_iot/feed/mtrsp
-    char devCaps[5];            // mtrsp
-    char description[50];       // motor speed
+    char devCaps[6];            // mtrsp
+    char description[40];       // motor speed
     uint8_t inOut;              // whether topic is an input or output
     uint8_t numOfCaps;          // number of device caps
+    uint8_t dirtyBit;
 } MQTTBinding;
 
 

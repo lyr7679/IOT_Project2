@@ -89,7 +89,7 @@
 
 //adafruit credentials
 #define IO_USRNAME "uta_iot"
-#define IO_KEY ""
+#define IO_KEY "aio_vEKu027tKLZcwcf2O7c1SCMb0EN6"
 
 
 
@@ -545,25 +545,23 @@ void processShell()
                 snprintf(bufferTemp, 80, "%s", "\nDevice Number\t\tDevice MAC Address\n");
                 putsUart0(bufferTemp);
                 uint32_t temp = 0;
-                uint16_t address = 13u;
+                uint16_t address = 14u;
                 for(i = 0; i < readEeprom(10u); i++)
                 {
-                    address += 1u;
-                    //temp = (readEeprom(address) & 0x0F000000) >> 24;
                     temp = readEeprom(address);
-                    snprintf(bufferTemp, 80, "%d\t\t\t\t", 1 << temp);
+                    temp = 1 << temp;
+                    snprintf(bufferTemp, 80, "%d\t\t\t\t", temp);
                     putsUart0(bufferTemp);
                     for(j = 0; j < 5; j++)
                     {
-                        address += 1u;
-                        temp = readEeprom(address);
+                        temp = readEeprom(address + j + 1);
                         snprintf(bufferTemp, 80, "%d:", temp);
                         putsUart0(bufferTemp);
                     }
-                    address += 1u;
-                    temp = readEeprom(address);
+                    temp = readEeprom(address + 6);
                     snprintf(bufferTemp, 80, "%d\n", temp);
                     putsUart0(bufferTemp);
+                    address += 13;
                 }
             }
             if (strcmp(token, "ping") == 0)
@@ -608,17 +606,17 @@ void processShell()
                 MQTTBinding binding3  = {0};
                 MQTTBinding *binding[] = {&binding1, &binding2, &binding3};
                 //MQTTBinding binding[3];
-                char bindingTemp[30];
+                char bindingTemp[50] = {};
                 char tempCaps[4][6] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
                 uint16_t j = 0;
-                char * inOrOut;
-                snprintf(bufferTemp, 80, "%s", "Device Number\t\tType\t\tFunction\tUnits\n");
+                char inOrOut[8] = {};
+                snprintf(bufferTemp, 80, "%s", "Device Number\t\tType\t\tBound\tFunction\tUnits\n");
                 putsUart0(bufferTemp);
 
                 for(i = 0; i < 4; i++)
                 {
                     MQTTBinding *isBinding = mqtt_binding_table_get(binding, 3, tempCaps[i]);
-                    if(isBinding != NULL)
+                    if(binding[0]->client_id[0] == 'd')
                     {
                         for(j = 0; j < binding[0]->numOfCaps - '0'; j++)
                         {
@@ -627,7 +625,7 @@ void processShell()
                             else if(binding[j]->inOut == OUTPUT)
                                 strncpy(inOrOut, "output", 6);
                             strcpy(bindingTemp, strtok(binding[j]->description, " "));
-                            snprintf(bufferTemp, 80, "%c\t%s\t%s\t%s\n", binding[j]->client_id[6], inOrOut, bindingTemp, strtok(NULL, " "));
+                            snprintf(bufferTemp, 80, "\t%c\t\t\t%s\t%d\t%s\t%s\n", binding[j]->client_id[6], inOrOut, binding[j]->dirtyBit, bindingTemp, strtok(NULL, " "));
                             putsUart0(bufferTemp);
                         }
                     }
@@ -640,6 +638,110 @@ void processShell()
                 }
 
             }
+            if (strcmp(token, "bind") == 0)
+            {
+                char devCapName[6] = {};
+                char concatStr[6] = {};
+                bool flag = false;
+                uint8_t i, j;
+                char tempCaps[4][6] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+
+                strcpy(devCapName, strtok(NULL, " "));
+
+                strncpy(concatStr, devCapName, 3);
+
+                for(i = 0; i < 4; i++)
+                {
+                    if(tempCaps[i][0] == concatStr[0])
+                    {
+                        flag = true;
+                        if(concatStr[0] == 'M')
+                        {
+                            strncat(concatStr, tempCaps[i] + 3, 2);
+                        }
+                        else
+                        {
+                            strncat(concatStr, tempCaps[i] + 4, 1);
+                        }
+                        break;
+                    }
+                }
+
+                if(flag == true)
+                {
+                    MQTTBinding binding1 = {0};
+                    MQTTBinding binding2 = {0};
+                    MQTTBinding binding3  = {0};
+                    MQTTBinding *binding[] = {&binding1, &binding2, &binding3};
+
+
+                    MQTTBinding *isBinding = mqtt_binding_table_get(binding, 3, concatStr);
+                    if(binding[0]->client_id[0] == 'd')
+                    {
+                        for(j = 0; j < binding[0]->numOfCaps - '0'; j++)
+                        {
+                            if(strcmp(concatStr, binding[j]->devCaps) == 0)
+                            {
+                                binding[j]->dirtyBit = 1;
+                                mqtt_binding_table_put(binding, binding[j]->numOfCaps - '0');
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (strcmp(token, "unbind") == 0)
+            {
+                char devCapName[6] = {};
+                char concatStr[6] = {};
+                bool flag = false;
+                uint8_t i, j;
+                char tempCaps[4][6] = {"MTRSP", "TEMPF", "BARCO", "DISTC"};
+
+                strcpy(devCapName, strtok(NULL, " "));
+
+                strncpy(concatStr, devCapName, 3);
+
+                for(i = 0; i < 4; i++)
+                {
+                    if(tempCaps[i][0] == concatStr[0])
+                    {
+                        flag = true;
+                        if(concatStr[0] == 'M')
+                        {
+                            strncat(concatStr, tempCaps[i] + 3, 2);
+                        }
+                        else
+                        {
+                            strncat(concatStr, tempCaps[i] + 4, 1);
+                        }
+                        break;
+                    }
+                }
+
+                if(flag == true)
+                {
+                    MQTTBinding binding1 = {0};
+                    MQTTBinding binding2 = {0};
+                    MQTTBinding binding3  = {0};
+                    MQTTBinding *binding[] = {&binding1, &binding2, &binding3};
+
+
+                    MQTTBinding *isBinding = mqtt_binding_table_get(binding, 3, concatStr);
+                    if(binding[0]->client_id[0] == 'd')
+                    {
+                        for(j = 0; j < binding[0]->numOfCaps - '0'; j++)
+                        {
+                            if(strcmp(concatStr, binding[j]->devCaps) == 0)
+                            {
+                                binding[j]->dirtyBit = 0;
+                                mqtt_binding_table_put(binding, binding[j]->numOfCaps - '0');
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             if (strcmp(token, "ifconfig") == 0)
             {
                 displayConnectionInfo();
@@ -647,11 +749,12 @@ void processShell()
             if (strcmp(token, "wipe") == 0)
             {
                 uint16_t x;
-                for (x = 0; i < 65535; x++)
+                for (x = 0; x < 65535; x++)
                 {
                     i2cEepromWrite(0x50, x, 0xFF);
                     waitMicrosecond(5000);
                 }
+                putsUart0("Wipe Done");
             }
             if (strcmp(token, "reboot") == 0)
             {
@@ -1270,7 +1373,7 @@ void processTransmission()
         if(isValidRead)
         {
             sendMqttMessage(data, sockets[gf_mqtt_device_pub], PUBLISH, mqttFlags, (void *)publishMsg, 30, 2);
-            if(isPubMsgBufferEmpty())
+            // if(isPubMsgBufferEmpty())
                 gf_mqtt_device_pub = 0;
         }
         else
@@ -1553,19 +1656,20 @@ int main(void)
                                                     pushMessage pshMsg;
                                                     strncpy(pshMsg.topicName, shortTopicName, 5);
                                                     strncpy(pshMsg.topicMessage, (char *)mqttMessage, msgLength);
-
+                                                    
+                                                    setPushFlag(true);
                                                     MQTTBinding binding[3];
-                                                //    strncpy(binding[0].devCaps, shortTopicName, 5);
                                                     MQTTBinding *isDevicePresent = mqtt_binding_table_get((MQTTBinding **)&binding, 3, pshMsg.topicName);
 
                                                     if(isDevicePresent != NULL)
                                                     {
-                                                        bool isOverflow = queuePushMsg(&pshMsg, (binding[0].client_id[6]) - '0');
-                                                        if(isOverflow)
-                                                            putsUart0("Push Message Buffer overload\n");
+//                                                        if(binding[0].dirtyBit == 1)
+                                                        queuePushMsg(&pshMsg, (binding[0].client_id[6]) - '0');
+                                                        // if(isOverflow)
+                                                        //     putsUart0("Push Message Buffer overload\n");
 
-                                                    }                                                    
-                                                break;
+                                                    }
+                                                    break;
                                             }
                                         }
                                         break;

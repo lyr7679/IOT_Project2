@@ -16,8 +16,8 @@
 // Device includes, defines, and assembler directives
 //-----------------------------------------------------------------------------
 
-#ifndef TIMER_H_
-#define TIMER_H_
+#ifndef TIMER_WR_H_
+#define TIMER_WR_H_
 
 typedef void (*_callback_wr)();
 

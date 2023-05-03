@@ -315,6 +315,7 @@ uint8_t getWebserverDeviceNumber(void);
 
 void setShellDestinationDevNumber(uint8_t devNum);
 
+void setPushFlag(bool push);
 //----------------------------------------------------
 // Timer Internal functions
 //----------------------------------------------------
